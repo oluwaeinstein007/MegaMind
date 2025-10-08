@@ -1,0 +1,91 @@
+{
+	"name": "megamind",
+	"version": "1.0.0",
+	"description": "Mcp server for nxGnosis MegaMind",
+	"main": "src/index.ts",
+	"type": "module",
+	"bin": {
+		"mcp-megamind": "dist/index.js"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc && shx chmod +x dist/index.js",
+		"prepare": "husky",
+		"watch": "tsc --watch",
+		"start": "node dist/index.js",
+		"publish-packages": "pnpm run build && changeset publish",
+		"format": "biome format . --write",
+		"lint": "biome check ."
+	},
+	"packageManager": "pnpm@10.7.1",
+	"publishConfig": {
+		"access": "public"
+	},
+	"exports": {
+		".": {
+			"import": "./src/index.ts",
+			"require": "./src/index.js"
+		},
+		"./tool-selector": {
+			"import": "./src/tool-selector.ts",
+			"require": "./src/tool-selector.js"
+		}
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nxGnosis/mcp-megamind.git"
+	},
+	"keywords": [
+		"mcp",
+		"megamind",
+		"ai",
+		"ingestor"
+	],
+	"author": "LanreCodes nxGnosis ",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/nxGnosis/mcp-megamind/issues"
+	},
+	"homepage": "https://github.com/nxGnosis/mcp-megamind#readme",
+	"devDependencies": {
+		"@biomejs/biome": "*",
+		"@changesets/cli": "^2.29.7",
+		"@types/node": "^24.7.0",
+		"husky": "^9.1.7",
+		"lint-staged": "^15.5.2",
+		"tsx": "^4.20.6",
+		"typescript": "^5.9.3"
+	},
+	"dependencies": {
+		"@biomejs/biome": "^2.2.5",
+		"@langchain/community": "^0.3.57",
+		"@langchain/core": "^0.3.78",
+		"@langchain/openai": "^0.6.14",
+		"@qdrant/js-client-rest": "^1.15.1",
+		"@types/body-parser": "^1.19.6",
+		"@types/express": "^5.0.3",
+		"@types/papaparse": "^5.3.16",
+		"axios": "^1.12.2",
+		"body-parser": "^2.2.0",
+		"cheerio": "^1.1.2",
+		"dedent": "^1.7.0",
+		"express": "^5.1.0",
+		"fastmcp": "^3.19.1",
+		"gql.tada": "^1.8.13",
+		"graphql-request": "^7.2.0",
+		"langchain": "^0.3.35",
+		"mammoth": "^1.11.0",
+		"openai": "^4.104.0",
+		"papaparse": "^5.5.3",
+		"pdf-parse": "^1.1.1",
+		"playwright": "^1.56.0",
+		"robots-parser": "^3.0.1",
+		"sqlite": "^5.1.1",
+		"sqlite3": "^5.1.7",
+		"tiktoken": "^1.0.22",
+		"xlsx": "^0.18.5",
+		"zod": "^3.25.76"
+	}
+}

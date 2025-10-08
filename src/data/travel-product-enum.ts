@@ -1,0 +1,28 @@
+//enums for the travel products in travel-url-data.ts
+export enum TravelProduct {
+    FLIGHT = "flight",
+    HOTEL = "hotel",
+    TOUR = "tour",
+    CRUISE = "cruise",
+    TRAVEL_INSURANCE = "insurance",
+    // VACATION_PACKAGE = "vacation_package",
+    CAR_RENTAL = "carRentals",
+    IMMIGRATION = "immigration",
+    VISA = "visa",
+    EXPERIENCE = "experience",
+    EVENT = "event",
+    ACCOMMODATION = "accommodation",
+    // TRANSPORTATION = "transportation",
+    // ATTRACTION = "attraction",
+    // RESTAURANT = "restaurant",
+    TRAVEL_GUIDE = "travelGuides",
+    HEALTH = "health",
+    SAFETY = "safety",
+    // WEATHER = "weather",
+    // LANGUAGE = "language",
+    // LOCAL_SIM = "localSim",
+    // CURRENCY_EXCHANGE = "currencyExchange",
+    // TRAVEL_GADGETS = "travelGadgets",
+    LUGGAGE = "luggage",
+    LOYALTY = "loyalty"
+}
