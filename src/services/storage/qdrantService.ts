@@ -1,13 +1,6 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { TextSplitter } from '../chunking/textSplitter.js';
 
-interface QdrantOptions {
-  url?: string; // Qdrant instance URL
-  collectionName?: string; // Name of the collection to use
-  vectorSize?: number; // Size of the vectors (e.g., embedding dimension)
-  // Add other Qdrant client options as needed
-}
-
 export class QdrantService {
 
   private client: QdrantClient;
@@ -15,16 +8,26 @@ export class QdrantService {
   private vectorSize: number;
   private textSplitter: TextSplitter;
 
-  constructor(options: QdrantOptions = {}) {
-    const {
-      url = 'http://localhost:6333', // Default Qdrant URL
-      collectionName = 'documents', // Default collection name
-      vectorSize = 1536, // Default vector size for OpenAI's text-embedding-ada-002
-    } = options;
+  constructor() {
+    const qdrantHost = process.env.QDRANT_HOST;
+    const qdrantKey = process.env.QDRANT_KEY;
 
-    this.client = new QdrantClient({ url });
-    this.collectionName = collectionName;
-    this.vectorSize = vectorSize;
+    if (!qdrantHost) {
+      throw new Error("QDRANT_HOST environment variable is not set.");
+    }
+    if (!qdrantKey) {
+      throw new Error("QDRANT_KEY environment variable is not set.");
+    }
+
+    // Initialize Qdrant client with URL and API key from environment variables
+    this.client = new QdrantClient({
+      url: qdrantHost,
+      apiKey: qdrantKey,
+    });
+
+    // Default collection name and vector size
+    this.collectionName = 'documents'; // Default collection name
+    this.vectorSize = 1536; // Default vector size for OpenAI's text-embedding-ada-002
     this.textSplitter = new TextSplitter();
   }
 

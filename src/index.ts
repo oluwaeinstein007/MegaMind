@@ -4,6 +4,7 @@ import { getVisaInfoByCountry } from "./tools/visa-tools/getVisaInfoByCountry.js
 import { ingestUrlTool } from "./tools/ingestor-tools/ingestUrlTool.js";
 import { ingestFileTool } from "./tools/ingestor-tools/ingestFileTool.js";
 import { getDocumentTool } from "./tools/ingestor-tools/getDocumentTool.js";
+import { ingestAllUrlsTool } from "./tools/ingestor-tools/ingestAllUrlsTool.js";
 
 async function main() {
 	console.log("Initializing MCP MegaMind Server...");
@@ -22,6 +23,7 @@ async function main() {
 	server.addTool(ingestUrlTool);
 	server.addTool(ingestFileTool);
 	server.addTool(getDocumentTool);
+	server.addTool(ingestAllUrlsTool);
 
 
 	try {
