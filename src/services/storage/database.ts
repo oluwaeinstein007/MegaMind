@@ -1,5 +1,6 @@
 import { open, Database } from 'sqlite';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 // Define an interface for the document row to improve type safety
 interface DocumentRow {
@@ -21,6 +22,9 @@ export class DatabaseService {
 
   constructor(dbName: string = 'ingestor.db') {
     // Store the database file in the project root for simplicity
+    // Compute __dirname equivalent in ESM using import.meta.url
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
     // __dirname will be in ./dist when compiled, so we need to go up two levels
     this.dbPath = path.join(__dirname, '..', '..', dbName);
   }

@@ -3,29 +3,28 @@ import { DocumentParser } from './ingestion/documentParser.js';
 import { DatabaseService } from './storage/database.js';
 import path from 'path';
 import { TextSplitter } from './chunking/textSplitter.js'; // Import TextSplitter
-import { OpenAIEmbeddings } from '@langchain/openai'; // Import OpenAIEmbeddings
+import createEmbeddings from '../lib/llm.js';
 import { QdrantService } from './storage/qdrantService.js'; // Import QdrantService
 
 export class IngestorService {
-  private webCrawler: WebCrawler;
+  private webCrawler: WebCrawler | null = null;
   private documentParser: DocumentParser;
   private databaseService: DatabaseService;
   private textSplitter: TextSplitter; // Add TextSplitter instance
-  private embeddings: OpenAIEmbeddings; // Add embeddings instance
+  private embeddings: any; // Add embeddings instance (LLM-agnostic wrapper)
   private qdrantService: QdrantService; // Add QdrantService instance
   private isInitialized: boolean = false; // Track initialization status
+  private defaultMaxDepth = 2;
+  private defaultRateLimitMs = 500;
 
-  constructor(apiKey: string) { // Accept API key in constructor
+  constructor() {
     // Initialize services with default configurations
-    this.webCrawler = new WebCrawler({
-      maxDepth: 2, // Default depth for MVP
-      baseUrl: '', // Will be set during ingestUrl
-      rateLimitMs: 500, // Slightly faster rate limit for MVP
-    });
+    // Do not create WebCrawler here because it requires a valid baseUrl.
+    // We'll instantiate it per-ingest when a real URL is provided.
     this.documentParser = new DocumentParser();
     this.databaseService = new DatabaseService();
     this.textSplitter = new TextSplitter(); // Initialize TextSplitter
-    this.embeddings = new OpenAIEmbeddings({ apiKey: apiKey }); // Initialize OpenAIEmbeddings
+    this.embeddings = createEmbeddings(); // Create provider-specific embeddings implementation
     this.qdrantService = new QdrantService(); // Initialize QdrantService
   }
 
@@ -43,14 +42,35 @@ export class IngestorService {
   async ingestUrl(url: string): Promise<string[]> {
     await this.initialize(); // Ensure initialization
 
-    // Update the web crawler's base URL
+    // Normalize and validate the provided URL. Trim whitespace and ensure it has a protocol.
+    let normalizedUrl = url.trim();
+    try {
+      new URL(normalizedUrl);
+    } catch (e) {
+      // If missing protocol, try prefixing https://
+      if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedUrl)) {
+        normalizedUrl = `https://${normalizedUrl}`;
+        try {
+          new URL(normalizedUrl);
+        } catch (err) {
+          throw new Error(`The \`url\` param expected to contain a valid URL starting with a protocol (http:// or https://). Received: ${url}`);
+        }
+      } else {
+        throw new Error(`The \`url\` param expected to contain a valid URL starting with a protocol (http:// or https://). Received: ${url}`);
+      }
+    }
+
+    // (Re)create the web crawler with the validated start URL.
+    // WebCrawler expects a valid baseUrl, so instantiate it here instead of in the constructor.
     this.webCrawler = new WebCrawler({
-      ...this.webCrawler, // Keep existing options
-      baseUrl: url,
+      maxDepth: this.defaultMaxDepth,
+      baseUrl: normalizedUrl,
+      rateLimitMs: this.defaultRateLimitMs,
+      respectRobotsTxt: false,
     });
 
-    console.log(`Starting web crawl from: ${url}`);
-    const crawledPages = await this.webCrawler.start(url);
+    console.log(`Starting web crawl from: ${normalizedUrl}`);
+    const crawledPages = await this.webCrawler.start(normalizedUrl);
     const ingestedIds: string[] = [];
 
     for (const [pageUrl, pageData] of crawledPages.entries()) {

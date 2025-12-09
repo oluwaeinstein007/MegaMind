@@ -27,7 +27,9 @@ export class QdrantService {
 
     // Default collection name and vector size
     this.collectionName = 'documents'; // Default collection name
-    this.vectorSize = 1536; // Default vector size for OpenAI's text-embedding-ada-002
+    // Allow embedding dimension to be configured via env, otherwise default to 1536
+    const envVec = process.env.EMBEDDING_VECTOR_SIZE;
+    this.vectorSize = envVec ? parseInt(envVec, 10) : 1536;
     this.textSplitter = new TextSplitter();
   }
 

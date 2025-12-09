@@ -14,22 +14,22 @@ export const getDocumentTool = {
 	parameters: getDocumentParamsSchema,
 	execute: async (args: z.infer<typeof getDocumentParamsSchema>) => {
 
-        const OpenAIKey = process.env.OPENAI_API_KEY || '';
-        if (!OpenAIKey) {
-            throw new Error("OPENAI_API_KEY is not set in the environment.");
-        }
+		const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+		if (!apiKey) {
+			throw new Error("LLM_API_KEY (or OPENAI_API_KEY) is not set in the environment.");
+		}
 
 		try {
 			if(args.id){
 				console.log(`[DOCUMENT_RETRIEVAL_TOOL] retrieving document ID: ${args.id}`);
-				const retrieveResponse = await new IngestorService(OpenAIKey).getDocument(args.id);
+				const retrieveResponse = await new IngestorService().getDocument(args.id);
 				console.log(`Retrieved: ID=${retrieveResponse.id}, Source=${retrieveResponse.source}, Type=${retrieveResponse.type}`);
 				
 				return `✅ Retrieval Successful
 				The following document was retrieved:
 				${retrieveResponse}`;
 			  } else {
-				const retrieveResponse = await new IngestorService(OpenAIKey).getAllDocuments();
+				const retrieveResponse = await new IngestorService().getAllDocuments();
 				console.log(`Found ${retrieveResponse.length} documents:`);
 				retrieveResponse.forEach(doc => {
 					console.log(`- ID: ${doc.id}, Source: ${doc.source}, Type: ${doc.type}, Metadata: ${JSON.stringify(doc.metadata)}`);

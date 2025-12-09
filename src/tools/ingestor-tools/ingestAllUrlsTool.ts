@@ -12,12 +12,12 @@ export const ingestAllUrlsTool = {
     description: "Ingests content from multiple URLs based on a category or all available URLs from the travel dataset.",
     parameters: ingestAllUrlsParamsSchema,
     execute: async (args: z.infer<typeof ingestAllUrlsParamsSchema>) => {
-        const OpenAIKey = process.env.OPENAI_API_KEY || '';
-        if (!OpenAIKey) {
-            throw new Error("OPENAI_API_KEY is not set in the environment.");
+        const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+        if (!apiKey) {
+            throw new Error("LLM_API_KEY (or OPENAI_API_KEY) is not set in the environment.");
         }
 
-        const ingestorService = new IngestorService(OpenAIKey);
+        const ingestorService = new IngestorService();
         await ingestorService.initialize(); // Ensure initialization
 
         let urlsToIngest: string[] = [];
@@ -27,13 +27,13 @@ export const ingestAllUrlsTool = {
             const category = args.category.toLowerCase();
             const availableCategories = getCategories();
             if (availableCategories.includes(category)) {
-                urlsToIngest = getUrlsByCategory(category as keyof TravelUrlsDataset).map(item => item.url);
+                urlsToIngest = getUrlsByCategory(category as keyof TravelUrlsDataset).map(item => item.url.trim());
                 categoryDescription = `URLs in the '${category}' category`;
             } else {
                 throw new Error(`Invalid category: ${args.category}. Available categories are: ${availableCategories.join(', ')}`);
             }
         } else {
-            urlsToIngest = getAllUrls();
+            urlsToIngest = getAllUrls().map(u => u.trim());
             categoryDescription = "all URLs";
         }
 

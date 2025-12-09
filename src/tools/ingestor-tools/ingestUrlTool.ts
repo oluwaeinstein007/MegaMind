@@ -13,15 +13,15 @@ export const ingestUrlTool = {
 	parameters: ingestUrlParamsSchema,
 	execute: async (args: z.infer<typeof ingestUrlParamsSchema>) => {
 
-        const OpenAIKey = process.env.OPENAI_API_KEY || '';
-        if (!OpenAIKey) {
-            throw new Error("OPENAI_API_KEY is not set in the environment.");
-        }
+		const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+		if (!apiKey) {
+			throw new Error("LLM_API_KEY (or OPENAI_API_KEY) is not set in the environment.");
+		}
 
         console.log(`[INGEST_URL_TOOL] ingesting URL: ${args.url}`);
 
 		try {
-            const ingestResponse = await new IngestorService(OpenAIKey).ingestUrl(args.url);
+			const ingestResponse = await new IngestorService().ingestUrl(args.url);
 
             return `✅ Ingestion Successful
 
