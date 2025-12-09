@@ -7,10 +7,23 @@ export class QdrantService {
   private collectionName: string;
   private vectorSize: number;
   private textSplitter: TextSplitter;
+  private enabled: boolean;
 
   constructor() {
     const qdrantHost = process.env.QDRANT_HOST;
     const qdrantKey = process.env.QDRANT_KEY;
+    const enabledFlag = process.env.QDRANT_ENABLED ?? 'true';
+    this.enabled = String(enabledFlag).toLowerCase() !== 'false';
+
+    if (!this.enabled) {
+      console.log('Qdrant disabled via QDRANT_ENABLED=false; skipping Qdrant initialization.');
+      // Provide defaults so rest of service can be constructed
+      this.client = {} as any;
+      this.collectionName = 'documents';
+      this.vectorSize = parseInt(process.env.EMBEDDING_VECTOR_SIZE || '1536', 10);
+      this.textSplitter = new TextSplitter();
+      return;
+    }
 
     if (!qdrantHost) {
       throw new Error("QDRANT_HOST environment variable is not set.");
@@ -34,6 +47,14 @@ export class QdrantService {
   }
 
   async initialize(): Promise<void> {
+    if (!this.enabled) {
+      console.log('QdrantService.initialize: Qdrant is disabled; skipping initialization.');
+      return;
+    }
+
+    // Read API key from env here as well for fallback host attempts
+    const qdrantKey = process.env.QDRANT_KEY;
+
     try {
       // Check if collection exists, create if not
       const collectionsResponse = await this.client.getCollections();
@@ -54,7 +75,60 @@ export class QdrantService {
         console.log(`Qdrant collection '${this.collectionName}' already exists.`);
       }
     } catch (error: any) {
-      console.error('Error initializing Qdrant client or collection:', error.message);
+      console.warn('getCollections failed:', error?.message ?? error);
+
+      // Try to create the collection directly on the current client (some hosted endpoints
+      // may not expose listing but allow creation). If that fails, attempt host variants
+      // (e.g. remove explicit port) and retry creating the collection.
+      const tryCreate = async (client: QdrantClient) => {
+        try {
+          await client.createCollection(this.collectionName, {
+            vectors: { size: this.vectorSize, distance: 'Cosine' },
+          });
+          console.log(`Collection '${this.collectionName}' created via fallback createCollection.`);
+          return true;
+        } catch (err: any) {
+          return false;
+        }
+      };
+
+      // First, attempt create on the existing client
+      if (await tryCreate(this.client)) return;
+
+      // Build host variants to try (remove explicit port, try without port, try forcing https)
+      const originalHost = process.env.QDRANT_HOST || '';
+      const hostCandidates: string[] = [];
+      try {
+        const parsed = new URL(originalHost);
+        // candidate: same without port
+        parsed.port = '';
+        hostCandidates.push(parsed.toString().replace(/\/$/, ''));
+        // candidate: force https without port
+        parsed.protocol = 'https:';
+        hostCandidates.push(parsed.toString().replace(/\/$/, ''));
+      } catch (e) {
+        // fallback heuristics
+        if (originalHost) {
+          hostCandidates.push(originalHost.replace(/:\d+/, ''));
+        }
+      }
+
+      for (const candidate of hostCandidates) {
+        if (!candidate || candidate === originalHost) continue;
+        try {
+          const altClient = new QdrantClient({ url: candidate, apiKey: qdrantKey as string });
+          if (await tryCreate(altClient)) {
+            // switch to using this client going forward
+            this.client = altClient;
+            console.log(`Switched Qdrant host to '${candidate}' and created collection.`);
+            return;
+          }
+        } catch (err) {
+          // ignore and try next
+        }
+      }
+
+      console.error('Error initializing Qdrant client or collection:', error.message ?? error);
       throw error;
     }
   }

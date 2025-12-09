@@ -50,6 +50,9 @@ export const ingestAllUrlsTool = {
         for (const url of urlsToIngest) {
             try {
                 console.log(`Ingesting URL: ${url}`);
+                // Log normalized preview for debugging
+                const preview = url.length > 100 ? url.slice(0, 100) + '...' : url;
+                console.debug(`[INGEST_ALL_URLS_TOOL] URL preview before ingest: ${preview}`);
                 const ingestResponse = await ingestorService.ingestUrl(url);
                 results.push(`✅ Successfully ingested ${url}. Ingested IDs: ${ingestResponse.join(', ')}`);
                 successfulIngestions++;

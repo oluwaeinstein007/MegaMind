@@ -43,20 +43,39 @@ export class IngestorService {
     await this.initialize(); // Ensure initialization
 
     // Normalize and validate the provided URL. Trim whitespace and ensure it has a protocol.
-    let normalizedUrl = url.trim();
-    try {
-      new URL(normalizedUrl);
-    } catch (e) {
+    let normalizedUrl = (url || '').toString().trim();
+
+    // Strip surrounding quotes and common invisible chars (BOM, zero-width spaces)
+    normalizedUrl = normalizedUrl.replace(/^[\"'\uFEFF\u200B\u200C\u200D]+|[\"'\uFEFF\u200B\u200C\u200D]+$/g, '');
+
+    // Collapse internal whitespace and encode spaces
+    if (/\s/.test(normalizedUrl)) {
+      normalizedUrl = normalizedUrl.replace(/\s+/g, ' ');
+      normalizedUrl = normalizedUrl.replace(/ /g, '%20');
+    }
+
+    const isValidUrl = (s: string) => {
+      try {
+        // This will throw for invalid URLs
+        // allow protocol-relative by rejecting them here
+        const parsed = new URL(s);
+        return Boolean(parsed.protocol && (parsed.protocol === 'http:' || parsed.protocol === 'https:'));
+      } catch (e) {
+        return false;
+      }
+    };
+
+    if (!isValidUrl(normalizedUrl)) {
       // If missing protocol, try prefixing https://
       if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedUrl)) {
-        normalizedUrl = `https://${normalizedUrl}`;
-        try {
-          new URL(normalizedUrl);
-        } catch (err) {
-          throw new Error(`The \`url\` param expected to contain a valid URL starting with a protocol (http:// or https://). Received: ${url}`);
+        const tried = `https://${normalizedUrl}`;
+        if (isValidUrl(tried)) {
+          normalizedUrl = tried;
+        } else {
+          throw new Error(`The ` + "`url`" + ` param expected to contain a valid URL starting with a protocol (http:// or https://). Received: ${url}`);
         }
       } else {
-        throw new Error(`The \`url\` param expected to contain a valid URL starting with a protocol (http:// or https://). Received: ${url}`);
+        throw new Error(`The ` + "`url`" + ` param expected to contain a valid URL starting with a protocol (http:// or https://). Received: ${url}`);
       }
     }
 
