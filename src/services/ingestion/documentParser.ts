@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import pdfParse from 'pdf-parse';
+// Load pdf-parse at runtime using CommonJS require created from `createRequire`.
+// This avoids executing the package as a top-level script when loaded via ESM imports,
+// which can trigger its internal test/debug code that reads a non-existent file.
 import mammoth from 'mammoth';
 import * as cheerio from 'cheerio';
 import * as XLSX from 'xlsx';
@@ -61,6 +63,15 @@ export class DocumentParser {
 
   private async parsePdf(filePath: string, source: string): Promise<ParsedDocument> {
     const dataBuffer = fs.readFileSync(filePath);
+
+    // Require pdf-parse using a CommonJS require created from `createRequire` so
+    // the package runs under the CommonJS loader (module.parent will be set)
+    // and its embedded test/debug code does not execute when imported from ESM.
+    const { createRequire } = await import('module');
+    const requireFunc = createRequire(import.meta.url);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdfParse: any = requireFunc('pdf-parse');
+
     const pdfData = await pdfParse(dataBuffer);
     
     return {

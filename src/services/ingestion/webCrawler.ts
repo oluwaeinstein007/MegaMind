@@ -1,6 +1,5 @@
 import * as cheerio from 'cheerio';
 import { URL } from 'url';
-import robotsParser from 'robots-parser'; // Import robots-parser
 import { chromium, Browser, Page } from 'playwright'; // Import Playwright
 
 interface WebCrawlOptions {
@@ -56,7 +55,10 @@ export class WebCrawler {
       const robotsText = await page.content(); // Get content as text
 
       if (response && response.ok() && robotsText) {
-        this.robotsTxt = robotsParser(robotsUrl, robotsText);
+        // Dynamically import robots-parser to avoid ESM/CommonJS interop issues
+        const robotsModule = await import('robots-parser');
+        const robotsParserFunc = (robotsModule && (robotsModule.default ?? robotsModule)) as any;
+        this.robotsTxt = robotsParserFunc(robotsUrl, robotsText);
         console.log('robots.txt parsed successfully.');
       } else {
         console.warn(`robots.txt not found or empty at ${robotsUrl} (Status: ${response?.status()})`);
@@ -117,7 +119,7 @@ export class WebCrawler {
     }
 
     // Check if the URL is allowed by robots.txt
-    if (this.respectRobotsTxt && this.robotsTxt && !this.robotsTxt.isAllowed(url, 'MCPIngestor/1.0')) {
+    if (this.respectRobotsTxt && this.robotsTxt && typeof this.robotsTxt.isAllowed === 'function' && !this.robotsTxt.isAllowed(url, 'MCPIngestor/1.0')) {
       console.log(`Skipping disallowed URL due to robots.txt: ${url}`);
       return;
     }

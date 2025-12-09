@@ -1,4 +1,3 @@
-import sqlite3 from 'sqlite3';
 import { open, Database } from 'sqlite';
 import path from 'path';
 
@@ -27,6 +26,25 @@ export class DatabaseService {
   }
 
   async initialize(): Promise<void> {
+    // Lazy-load sqlite3 at runtime to avoid top-level native binding errors
+    // (which can happen when the native addon isn't built for the current Node.js).
+    const { createRequire } = await import('module');
+    const requireFunc = createRequire(import.meta.url);
+
+    let sqlite3: any;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      sqlite3 = requireFunc('sqlite3');
+    } catch (err: any) {
+      console.error('Failed to load sqlite3 native module.');
+      console.error('Reason:', err && err.message ? err.message : err);
+      console.error('Possible fixes:');
+      console.error('- Run `pnpm rebuild sqlite3` or `pnpm rebuild` to rebuild native modules for your Node version.');
+      console.error('- Ensure you have the required build toolchain (python, make, gcc) for node-gyp.');
+      console.error('- If you do not need sqlite3, remove it from dependencies.');
+      throw err;
+    }
+
     this.db = await open({
       filename: this.dbPath,
       driver: sqlite3.Database,

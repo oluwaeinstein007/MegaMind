@@ -53,8 +53,10 @@
 		"@biomejs/biome": "*",
 		"@changesets/cli": "^2.29.7",
 		"@types/node": "^24.7.0",
+		"@types/pdf-parse": "^1.1.5",
 		"husky": "^9.1.7",
 		"lint-staged": "^15.5.2",
+		"shx": "^0.4.0",
 		"tsx": "^4.20.6",
 		"typescript": "^5.9.3"
 	},
