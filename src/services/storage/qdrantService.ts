@@ -39,7 +39,7 @@ export class QdrantService {
     });
 
     // Default collection name and vector size
-    this.collectionName = 'documents'; // Default collection name
+    this.collectionName = 'journals'; // Default collection name
     // Allow embedding dimension to be configured via env, otherwise default to 1536
     const envVec = process.env.EMBEDDING_VECTOR_SIZE || '1536';
     this.vectorSize = envVec ? parseInt(envVec, 10) : 1536;
