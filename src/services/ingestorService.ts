@@ -122,21 +122,22 @@ export class IngestorService {
             embedding = new Array(vecSize).fill(0);
           }
 
-          // Save chunk to database and Qdrant
+          // Generate UUID for the chunk
+          const chunkId = randomUUID();
+
+          // Save chunk to database with chunkId
           const dbId = await this.databaseService.saveDocument(
             chunkMetadata.source,
             chunkMetadata.type,
             chunk, // Save the chunk content
-            chunkMetadata
+            chunkMetadata,
+            chunkId // Pass the UUID
           );
 
           if (dbId) {
-            // Use dbId as the point ID for Qdrant
-            const chunkId = randomUUID();
+            // Save embedding to Qdrant using the same chunkId
             await this.qdrantService.addChunk(chunkId, chunk, embedding);
             ingestedIds.push(chunkId);
-            // await this.qdrantService.addChunk(dbId.toString(), chunk, embedding);
-            // ingestedIds.push(dbId.toString());
           }
         }
       }
@@ -173,20 +174,21 @@ export class IngestorService {
           // Generate embedding for the chunk
           const embedding = await this.embeddings.embedQuery(chunk);
 
-          // Save chunk to database and Qdrant
+          // Generate UUID for the chunk
+          const chunkId = randomUUID();
+
+          // Save chunk to database with chunkId
           const dbId = await this.databaseService.saveDocument(
             chunkMetadata.source,
             chunkMetadata.type,
             chunk, // Save the chunk content
-            chunkMetadata
+            chunkMetadata,
+            chunkId // Pass the UUID
           );
           if (dbId) {
-            // Use dbId as the point ID for Qdrant
-            const chunkId = randomUUID();
+            // Save embedding to Qdrant using the same chunkId
             await this.qdrantService.addChunk(chunkId, chunk, embedding);
             chunkIds.push(chunkId);
-            // await this.qdrantService.addChunk(dbId.toString(), chunk, embedding);
-            // chunkIds.push(dbId.toString());
           }
         }
         // Return the ID of the first chunk, or null if no chunks were saved
@@ -208,6 +210,7 @@ export class IngestorService {
 
   async close(): Promise<void> {
     await this.databaseService.close();
+    this.textSplitter.free(); // Clean up the encoding
     // await this.qdrantService.close(); // Close Qdrant connection
   }
 }

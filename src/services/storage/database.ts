@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 // Define an interface for the document row to improve type safety
 interface DocumentRow {
   id: number;
+  chunkId?: string | null; // Optional UUID for the chunk
   source: string;
   type: string;
   content: string | null;
@@ -59,6 +60,7 @@ export class DatabaseService {
       this.db.exec(`
         CREATE TABLE IF NOT EXISTS documents (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chunkId TEXT,
           source TEXT NOT NULL,
           type TEXT NOT NULL,
           content TEXT,
@@ -72,11 +74,12 @@ export class DatabaseService {
     }
   }
 
-  async saveDocument(source: string, type: string, content: string | null, metadata: any): Promise<number | null> {
+  async saveDocument(source: string, type: string, content: string | null, metadata: any, chunkId?: string): Promise<number | null> {
     if (this.usingInMemory) {
       const id = this.nextInMemoryId++;
       const row: DocumentRow = {
         id,
+        chunkId: chunkId || null,
         source,
         type,
         content,
@@ -94,9 +97,9 @@ export class DatabaseService {
     try {
       const metadataJson = JSON.stringify(metadata);
       const stmt = this.db.prepare(
-        'INSERT INTO documents (source, type, content, metadata) VALUES (?, ?, ?, ?)'
+        'INSERT INTO documents (chunkId, source, type, content, metadata) VALUES (?, ?, ?, ?, ?)'
       );
-      const result = stmt.run(source, type, content, metadataJson);
+      const result = stmt.run(chunkId || null, source, type, content, metadataJson);
       return result.lastInsertRowid as number;
     } catch (error: any) {
       console.error(`Error saving document: ${error.message}`);
