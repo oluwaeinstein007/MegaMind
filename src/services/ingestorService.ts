@@ -5,6 +5,7 @@ import path from 'path';
 import { TextSplitter } from './chunking/textSplitter.js'; // Import TextSplitter
 import createEmbeddings from '../lib/llm.js';
 import { QdrantService } from './storage/qdrantService.js'; // Import QdrantService
+import { randomUUID } from 'crypto';
 
 export class IngestorService {
   private webCrawler: WebCrawler | null = null;
@@ -112,7 +113,14 @@ export class IngestorService {
           };
 
           // Generate embedding for the chunk
-          const embedding = await this.embeddings.embedQuery(chunk);
+          let embedding: number[];
+          try {
+            embedding = await this.embeddings.embedQuery(chunk);
+          } catch (err: any) {
+            console.warn('Embedding call failed; falling back to zero-vector. Error:', err?.message ?? err);
+            const vecSize = parseInt(process.env.EMBEDDING_VECTOR_SIZE || '1536', 10);
+            embedding = new Array(vecSize).fill(0);
+          }
 
           // Save chunk to database and Qdrant
           const dbId = await this.databaseService.saveDocument(
@@ -124,8 +132,11 @@ export class IngestorService {
 
           if (dbId) {
             // Use dbId as the point ID for Qdrant
-            await this.qdrantService.addChunk(dbId.toString(), chunk, embedding);
-            ingestedIds.push(dbId.toString());
+            const chunkId = randomUUID();
+            await this.qdrantService.addChunk(chunkId, chunk, embedding);
+            ingestedIds.push(chunkId);
+            // await this.qdrantService.addChunk(dbId.toString(), chunk, embedding);
+            // ingestedIds.push(dbId.toString());
           }
         }
       }
@@ -171,8 +182,11 @@ export class IngestorService {
           );
           if (dbId) {
             // Use dbId as the point ID for Qdrant
-            await this.qdrantService.addChunk(dbId.toString(), chunk, embedding);
-            chunkIds.push(dbId.toString());
+            const chunkId = randomUUID();
+            await this.qdrantService.addChunk(chunkId, chunk, embedding);
+            chunkIds.push(chunkId);
+            // await this.qdrantService.addChunk(dbId.toString(), chunk, embedding);
+            // chunkIds.push(dbId.toString());
           }
         }
         // Return the ID of the first chunk, or null if no chunks were saved

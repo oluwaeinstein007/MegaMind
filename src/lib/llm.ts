@@ -22,6 +22,7 @@ class OpenAIWrapper implements Embeddings {
   async embedDocuments(texts: string[]) {
     return await this.client.embedDocuments(texts);
   }
+
   async embedQuery(text: string) {
     const r = await this.client.embedQuery(text);
     return r;
@@ -30,71 +31,86 @@ class OpenAIWrapper implements Embeddings {
 
 class GeminiWrapper implements Embeddings {
   private apiKey: string;
-  private projectId?: string;
-  private location: string;
-  private model: string;
+  // Use the recommended model for embeddings
+  private model: string; 
 
-  constructor(apiKey: string, projectId?: string, location = 'us-central1', model = 'textembedding-gecko') {
+  // Default to the recommended model for embeddings
+  constructor(apiKey: string, model = 'text-embedding-004') {
     this.apiKey = apiKey;
-    this.projectId = projectId;
-    this.location = location;
     this.model = model;
   }
 
-  // NOTE: Vertex AI endpoints and auth can differ by setup. This implementation
-  // expects the environment to supply either an API key or application-default
-  // credentials. If you use service account keys, set up ADC or provide a
-  // proper bearer token. This wrapper attempts a simple REST call using an API
-  // key if present; otherwise it throws with instructions.
   private async requestEmbeddings(texts: string[]) {
-    if (!this.projectId) {
-      throw new Error('GEMINI requires GOOGLE_PROJECT_ID to be set in the environment.');
+    if (!this.apiKey) {
+      throw new Error('GOOGLE_API_KEY is required for Gemini embeddings.');
     }
 
-    const url = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/models/${this.model}:embedText`;
-
-    if (this.apiKey) {
-      const resp = await axios.post(`${url}?key=${this.apiKey}`, { instances: texts.map(t => ({ content: t })) });
+    // Correct URL structure for the Generative Language API's batchEmbedContents endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:batchEmbedContents?key=${this.apiKey}`;
+    
+    try {
+      const resp = await axios.post(
+        url,
+        {
+          // The Gemini API batchEmbedContents expects a list of requests, 
+          // where each request has the model name and the content to embed.
+          requests: texts.map(text => ({
+            model: `models/${this.model}`, // The model must be prefixed with 'models/'
+            content: { parts: [{ text }] }
+          }))
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
       return resp.data;
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.error?.message || error.message;
+      // Log more specific details if available
+      console.error('Gemini API Error:', error.response?.data || error.message);
+      throw new Error(`Gemini embeddings failed: ${errorMsg}`);
     }
-
-    throw new Error('No GOOGLE_API_KEY provided for Gemini embeddings. Configure GOOGLE_API_KEY or ADC.');
   }
 
   async embedDocuments(texts: string[]) {
     const result = await this.requestEmbeddings(texts);
-    // Attempt to extract embeddings from common response shapes.
-    if (Array.isArray(result?.predictions)) {
-      return result.predictions.map((p: any) => p.embedding ?? p[0]?.embedding ?? p);
+    
+    // Check for the expected array of embeddings in the response
+    if (Array.isArray(result?.embeddings)) {
+      // The Gemini API response provides 'values' inside each embedding object
+      return result.embeddings.map((item: any) => item.values);
     }
-    if (Array.isArray(result?.data?.embeddings)) {
-      return result.data.embeddings.map((e: any) => e.embedding ?? e);
-    }
-    throw new Error('Could not parse Gemini embeddings response.');
+
+    throw new Error('Could not parse Gemini embeddings response: ' + JSON.stringify(result));
   }
+
   async embedQuery(text: string) {
     const r = await this.embedDocuments([text]);
     return r[0];
   }
 }
 
+// ... The rest of your code remains the same
 export function createEmbeddings(options: LLMOptions = {}): Embeddings {
   const provider = options.provider || (process.env.LLM_PROVIDER as LLMProvider) || 'openai';
-  const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 
   if (provider === 'openai') {
-    if (!apiKey) throw new Error('OPENAI/LLM_API_KEY is required for OpenAI provider');
+    const apiKey = options.apiKey || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+    if (!apiKey) throw new Error('OPENAI_API_KEY or LLM_API_KEY is required for OpenAI provider');
     return new OpenAIWrapper(apiKey);
   }
 
   if (provider === 'gemini') {
-    const projectId = process.env.GOOGLE_PROJECT_ID;
-    const location = process.env.GOOGLE_LOCATION || 'us-central1';
-    const model = process.env.GEMINI_EMBEDDING_MODEL || 'textembedding-gecko';
-    if (!apiKey && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      throw new Error('To use Gemini embeddings set GOOGLE_API_KEY or configure application default credentials (GOOGLE_APPLICATION_CREDENTIALS)');
+    const apiKey = options.apiKey || process.env.GOOGLE_API_KEY || process.env.LLM_API_KEY || '';
+    const model = process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004';
+
+    if (!apiKey) {
+      throw new Error('GOOGLE_API_KEY or LLM_API_KEY is required for Gemini embeddings. Get one at: https://aistudio.google.com/app/apikey');
     }
-    return new GeminiWrapper(apiKey, projectId, location, model);
+
+    return new GeminiWrapper(apiKey, model);
   }
 
   throw new Error(`Unsupported LLM provider: ${provider}`);

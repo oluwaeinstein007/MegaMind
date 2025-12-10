@@ -16,7 +16,10 @@ if (fs.existsSync(envPath)) {
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
-    process.env[key] = val;
+    // Only set env var if not already provided in the environment
+    if (typeof process.env[key] === 'undefined') {
+      process.env[key] = val;
+    }
   }
 }
 
