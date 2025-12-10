@@ -1,4 +1,3 @@
-import { open, Database } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -17,7 +16,7 @@ interface ParsedDocumentRow extends Omit<DocumentRow, 'metadata'> {
 }
 
 export class DatabaseService {
-  private db: Database | null = null;
+  private db: any = null; // better-sqlite3 Database instance
   private dbPath: string;
   private usingInMemory: boolean = false;
   private inMemoryStore: Map<number, DocumentRow> = new Map();
@@ -33,23 +32,19 @@ export class DatabaseService {
   }
 
   async initialize(): Promise<void> {
-    // Lazy-load sqlite3 at runtime to avoid top-level native binding errors
-    // (which can happen when the native addon isn't built for the current Node.js).
+    // Lazy-load better-sqlite3 at runtime
     const { createRequire } = await import('module');
     const requireFunc = createRequire(import.meta.url);
 
-    let sqlite3: any;
+    let BetterSqlite3: any;
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      sqlite3 = requireFunc('sqlite3');
-      this.db = await open({
-        filename: this.dbPath,
-        driver: sqlite3.Database,
-      });
+      BetterSqlite3 = requireFunc('better-sqlite3');
+      this.db = new BetterSqlite3(this.dbPath);
     } catch (err: any) {
-      console.warn('Could not load sqlite3 native module; falling back to in-memory storage.');
+      console.warn('Could not load better-sqlite3 native module; falling back to in-memory storage.');
       console.warn('Reason:', err && err.message ? err.message : err);
-      console.warn('If you want persistent storage please install/build sqlite3 or configure a DATABASE_URL to use a different database.');
+      console.warn('If you want persistent storage please install/build better-sqlite3 or configure a DATABASE_URL to use a different database.');
       this.usingInMemory = true;
       this.inMemoryStore = new Map();
       this.nextInMemoryId = 1;
@@ -58,22 +53,22 @@ export class DatabaseService {
     // If using a disk sqlite DB, set up schema and PRAGMA. In-memory fallback skips this.
     if (this.db) {
       // Enable foreign key constraints
-      await this.db.run('PRAGMA foreign_keys = ON;');
+      this.db.pragma('foreign_keys = ON');
 
       // Create tables if they don't exist
-      await this.db.exec(`
+      this.db.exec(`
         CREATE TABLE IF NOT EXISTS documents (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           source TEXT NOT NULL,
           type TEXT NOT NULL,
           content TEXT,
-          metadata TEXT, -- Store metadata as JSON string
+          metadata TEXT,
           ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
       `);
       console.log(`Database initialized at ${this.dbPath}`);
     } else {
-      console.log('Using in-memory document store (no sqlite3 available).');
+      console.log('Using in-memory document store (no better-sqlite3 available).');
     }
   }
 
@@ -98,11 +93,11 @@ export class DatabaseService {
 
     try {
       const metadataJson = JSON.stringify(metadata);
-      const result = await this.db.run(
-        'INSERT INTO documents (source, type, content, metadata) VALUES (?, ?, ?, ?)',
-        [source, type, content, metadataJson]
+      const stmt = this.db.prepare(
+        'INSERT INTO documents (source, type, content, metadata) VALUES (?, ?, ?, ?)'
       );
-      return result.lastID ?? null;
+      const result = stmt.run(source, type, content, metadataJson);
+      return result.lastInsertRowid as number;
     } catch (error: any) {
       console.error(`Error saving document: ${error.message}`);
       return null;
@@ -124,10 +119,9 @@ export class DatabaseService {
       throw new Error('Database not initialized. Call initialize() first.');
     }
     try {
-      // Use type assertion for the row to satisfy TypeScript
-      const row = await this.db.get<DocumentRow>('SELECT * FROM documents WHERE id = ?', [id]);
+      const stmt = this.db.prepare('SELECT * FROM documents WHERE id = ?');
+      const row = stmt.get(id) as DocumentRow | undefined;
       if (row) {
-        // Parse metadata back to object
         const parsedRow: ParsedDocumentRow = {
           ...row,
           metadata: JSON.parse(row.metadata),
@@ -154,7 +148,8 @@ export class DatabaseService {
       throw new Error('Database not initialized. Call initialize() first.');
     }
     try {
-      const rows = await this.db.all<DocumentRow[]>('SELECT * FROM documents');
+      const stmt = this.db.prepare('SELECT * FROM documents');
+      const rows = stmt.all() as DocumentRow[];
       return rows.map(row => ({
         ...row,
         metadata: JSON.parse(row.metadata),
@@ -174,7 +169,7 @@ export class DatabaseService {
     }
 
     if (this.db) {
-      await this.db.close();
+      this.db.close();
       this.db = null;
       console.log('Database connection closed.');
     }
