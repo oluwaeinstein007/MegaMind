@@ -354,10 +354,10 @@ export interface TravelUrl {
     urlsByCategory: getUrlCountByCategory()
   };
   
-  console.log('Travel URLs Dataset loaded successfully!');
-  console.log(`Total Categories: ${datasetStats.totalCategories}`);
-  console.log(`Total URLs: ${datasetStats.totalUrls}`);
-  console.log('Categories:', getCategories().join(', '));
+  console.log('📥 Travel URLs Dataset loaded successfully!');
+  console.log(`📚 Total Categories: ${datasetStats.totalCategories}`);
+  console.log(`🔗 Total URLs: ${datasetStats.totalUrls}`);
+  console.log('🗂️ Categories:', getCategories().join(', '));
 
 
   // Example usage:  // console.log(getUrlsByCategory('visa'));

@@ -148,7 +148,7 @@ export class QdrantService {
           },
         ],
       });
-      console.log(`Chunk added to Qdrant: ${id}`);
+      console.log(`🧩 Chunk added to Qdrant: ${id}`);
     } catch (error: any) {
       console.error(`Error adding chunk ${id} to Qdrant: ${error.message}`);
       throw error;
