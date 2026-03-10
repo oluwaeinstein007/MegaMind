@@ -1,70 +1,87 @@
-import { z } from "zod";
-import { IngestorService } from "../../services/ingestorService.js"; // Import IngestorService
-import { travelUrls, getUrlsByCategory, getCategories, getAllUrls, TravelUrlsDataset } from "../../data/travel-urls-dataset.js";
+import { z } from 'zod';
+import { IngestorService } from '../../services/ingestorService.js';
+import {
+  getUrlsByCategory,
+  getCategories,
+  getAllUrls,
+  TravelUrlsDataset,
+} from '../../data/travel-urls-dataset.js';
 
-// Define schema for parameters
-const ingestAllUrlsParamsSchema = z.object({
-    category: z.string().optional().describe("Optional: The category of URLs to ingest (e.g., 'visa', 'flights'). If not provided, all URLs will be ingested."),
+const schema = z.object({
+  category: z
+    .string()
+    .optional()
+    .describe(
+      "Optional category to ingest (e.g. 'visa', 'flights'). Omit to ingest all available URLs."
+    ),
 });
 
 export const ingestAllUrlsTool = {
-    name: "INGEST_ALL_URLS_TOOL",
-    description: "Ingests content from multiple URLs based on a category or all available URLs from the travel dataset.",
-    parameters: ingestAllUrlsParamsSchema,
-    execute: async (args: z.infer<typeof ingestAllUrlsParamsSchema>) => {
-        const apiKey = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
-        if (!apiKey) {
-            throw new Error("LLM_API_KEY (or OPENAI_API_KEY) is not set in the environment.");
-        }
+  name: 'INGEST_ALL_URLS_TOOL',
+  description:
+    'Ingests content from the built-in travel URL dataset, either for a specific category or all 200+ URLs. ' +
+    'Duplicate content is automatically skipped.',
+  parameters: schema,
+  execute: async (args: z.infer<typeof schema>) => {
+    const service = new IngestorService();
+    await service.initialize();
 
-        const ingestorService = new IngestorService();
-        await ingestorService.initialize(); // Ensure initialization
+    let urlsToIngest: string[];
+    let label: string;
 
-        let urlsToIngest: string[] = [];
-        let categoryDescription = "all URLs";
+    if (args.category) {
+      const category = args.category.toLowerCase();
+      const available = getCategories();
+      if (!available.includes(category)) {
+        throw new Error(
+          `Unknown category '${args.category}'. Available: ${available.join(', ')}`
+        );
+      }
+      urlsToIngest = getUrlsByCategory(category as keyof TravelUrlsDataset).map(item =>
+        item.url.trim()
+      );
+      label = `'${category}' category`;
+    } else {
+      urlsToIngest = getAllUrls().map(u => u.trim());
+      label = 'all categories';
+    }
 
-        if (args.category) {
-            const category = args.category.toLowerCase();
-            const availableCategories = getCategories();
-            if (availableCategories.includes(category)) {
-                urlsToIngest = getUrlsByCategory(category as keyof TravelUrlsDataset).map(item => item.url.trim());
-                categoryDescription = `URLs in the '${category}' category`;
-            } else {
-                throw new Error(`Invalid category: ${args.category}. Available categories are: ${availableCategories.join(', ')}`);
-            }
-        } else {
-            urlsToIngest = getAllUrls().map(u => u.trim());
-            categoryDescription = "all URLs";
-        }
+    if (urlsToIngest.length === 0) {
+      return `No URLs found for ${label}.`;
+    }
 
-        if (urlsToIngest.length === 0) {
-            return `No URLs found to ingest for ${categoryDescription}.`;
-        }
+    console.log(`[INGEST_ALL_URLS_TOOL] Processing ${urlsToIngest.length} URL(s) in ${label}`);
 
-        console.log(`Starting ingestion for ${urlsToIngest.length} URLs in ${categoryDescription}...`);
+    const details: string[] = [];
+    let totalIngested = 0;
+    let totalSkipped = 0;
+    let failed = 0;
 
-        const results: string[] = [];
-        let successfulIngestions = 0;
-        let failedIngestions = 0;
+    for (const url of urlsToIngest) {
+      try {
+        const result = await service.ingestUrl(url);
+        totalIngested += result.ingestedCount;
+        totalSkipped += result.skippedCount;
+        details.push(`  OK  ${url} — ${result.ingestedCount} new, ${result.skippedCount} skipped`);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[INGEST_ALL_URLS_TOOL] Failed: ${url} — ${message}`);
+        details.push(`  ERR ${url} — ${message}`);
+        failed++;
+      }
+    }
 
-        for (const url of urlsToIngest) {
-            try {
-                console.log(`Ingesting URL: ${url}`);
-                // Log normalized preview for debugging
-                const preview = url.length > 100 ? url.slice(0, 100) + '...' : url;
-                console.debug(`[INGEST_ALL_URLS_TOOL] URL preview before ingest: ${preview}`);
-                const ingestResponse = await ingestorService.ingestUrl(url);
-                results.push(`✅ Successfully ingested ${url}. Ingested IDs: ${ingestResponse.join(', ')}`);
-                successfulIngestions++;
-            } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : "An unknown error occurred";
-                console.error(`[INGEST_ALL_URLS_TOOL] Error ingesting ${url}: ${message}`);
-                results.push(`❌ Failed to ingest ${url}: ${message}`);
-                failedIngestions++;
-            }
-        }
+    await service.close();
 
-        console.log(`Finished ingestion for ${categoryDescription}. Successful: ${successfulIngestions}, Failed: ${failedIngestions}`);
-        return `Ingestion complete for ${categoryDescription}.\nSuccessful: ${successfulIngestions}\nFailed: ${failedIngestions}\n\nDetails:\n${results.join('\n')}`;
-    },
+    return [
+      `Ingestion summary for ${label}:`,
+      `  URLs processed    : ${urlsToIngest.length}`,
+      `  Total new chunks  : ${totalIngested}`,
+      `  Total skipped     : ${totalSkipped}`,
+      `  Failed URLs       : ${failed}`,
+      '',
+      'Details:',
+      ...details,
+    ].join('\n');
+  },
 };

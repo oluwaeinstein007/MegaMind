@@ -1,169 +1,156 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
-import { TextSplitter } from '../chunking/textSplitter.js';
+
+export interface QdrantChunk {
+  id: string;
+  text: string;
+  embedding: number[];
+  metadata?: Record<string, any>;
+}
 
 export class QdrantService {
-
   private client: QdrantClient;
   private collectionName: string;
   private vectorSize: number;
-  private textSplitter: TextSplitter;
   private enabled: boolean;
 
   constructor() {
-    const qdrantHost = process.env.QDRANT_HOST;
-    const qdrantKey = process.env.QDRANT_KEY;
     const enabledFlag = process.env.QDRANT_ENABLED ?? 'true';
     this.enabled = String(enabledFlag).toLowerCase() !== 'false';
 
+    this.collectionName = process.env.QDRANT_COLLECTION_NAME || 'megamind';
+    this.vectorSize = parseInt(process.env.EMBEDDING_VECTOR_SIZE || '1536', 10);
+
     if (!this.enabled) {
-      console.log('Qdrant disabled via QDRANT_ENABLED=false; skipping Qdrant initialization.');
-      // Provide defaults so rest of service can be constructed
+      console.log('Qdrant disabled via QDRANT_ENABLED=false.');
       this.client = {} as any;
-      this.collectionName = 'documents';
-      this.vectorSize = parseInt(process.env.EMBEDDING_VECTOR_SIZE || '1536', 10);
-      this.textSplitter = new TextSplitter();
       return;
     }
 
-    if (!qdrantHost) {
-      throw new Error("QDRANT_HOST environment variable is not set.");
-    }
-    if (!qdrantKey) {
-      throw new Error("QDRANT_KEY environment variable is not set.");
-    }
+    const qdrantHost = process.env.QDRANT_HOST;
+    const qdrantKey = process.env.QDRANT_KEY;
 
-    // Initialize Qdrant client with URL and API key from environment variables
-    this.client = new QdrantClient({
-      url: qdrantHost,
-      apiKey: qdrantKey,
-    });
+    if (!qdrantHost) throw new Error('QDRANT_HOST environment variable is not set.');
+    if (!qdrantKey) throw new Error('QDRANT_KEY environment variable is not set.');
 
-    // Default collection name and vector size
-    this.collectionName = 'journals'; // Default collection name
-    // Allow embedding dimension to be configured via env, otherwise default to 1536
-    const envVec = process.env.EMBEDDING_VECTOR_SIZE || '1536';
-    this.vectorSize = envVec ? parseInt(envVec, 10) : 1536;
-    this.textSplitter = new TextSplitter();
+    this.client = new QdrantClient({ url: qdrantHost, apiKey: qdrantKey });
   }
 
   async initialize(): Promise<void> {
-    if (!this.enabled) {
-      console.log('QdrantService.initialize: Qdrant is disabled; skipping initialization.');
-      return;
-    }
-
-    // Read API key from env here as well for fallback host attempts
-    const qdrantKey = process.env.QDRANT_KEY;
+    if (!this.enabled) return;
 
     try {
-      // Check if collection exists, create if not
       const collectionsResponse = await this.client.getCollections();
-      const collectionExists = collectionsResponse.collections.some(
-        (col) => col.name === this.collectionName
-      );
+      const exists = collectionsResponse.collections.some(c => c.name === this.collectionName);
 
-      if (!collectionExists) {
+      if (!exists) {
         console.log(`Creating Qdrant collection: ${this.collectionName}`);
         await this.client.createCollection(this.collectionName, {
-          vectors: {
-            size: this.vectorSize,
-            distance: 'Cosine', // Or 'Euclid', 'Dot'
-          },
+          vectors: { size: this.vectorSize, distance: 'Cosine' },
         });
         console.log(`Collection '${this.collectionName}' created.`);
       } else {
         console.log(`Qdrant collection '${this.collectionName}' already exists.`);
       }
     } catch (error: any) {
-      console.warn('getCollections failed:', error?.message ?? error);
+      console.warn('getCollections failed, attempting direct create:', error?.message ?? error);
+      await this.tryCreateWithFallback();
+    }
+  }
 
-      // Try to create the collection directly on the current client (some hosted endpoints
-      // may not expose listing but allow creation). If that fails, attempt host variants
-      // (e.g. remove explicit port) and retry creating the collection.
-      const tryCreate = async (client: QdrantClient) => {
-        try {
-          await client.createCollection(this.collectionName, {
-            vectors: { size: this.vectorSize, distance: 'Cosine' },
-          });
-          console.log(`Collection '${this.collectionName}' created via fallback createCollection.`);
-          return true;
-        } catch (err: any) {
-          return false;
-        }
-      };
+  private async tryCreateWithFallback(): Promise<void> {
+    const qdrantKey = process.env.QDRANT_KEY;
+    const originalHost = process.env.QDRANT_HOST || '';
 
-      // First, attempt create on the existing client
-      if (await tryCreate(this.client)) return;
-
-      // Build host variants to try (remove explicit port, try without port, try forcing https)
-      const originalHost = process.env.QDRANT_HOST || '';
-      const hostCandidates: string[] = [];
+    const tryCreate = async (client: QdrantClient): Promise<boolean> => {
       try {
-        const parsed = new URL(originalHost);
-        // candidate: same without port
-        parsed.port = '';
-        hostCandidates.push(parsed.toString().replace(/\/$/, ''));
-        // candidate: force https without port
-        parsed.protocol = 'https:';
-        hostCandidates.push(parsed.toString().replace(/\/$/, ''));
-      } catch (e) {
-        // fallback heuristics
-        if (originalHost) {
-          hostCandidates.push(originalHost.replace(/:\d+/, ''));
-        }
+        await client.createCollection(this.collectionName, {
+          vectors: { size: this.vectorSize, distance: 'Cosine' },
+        });
+        console.log(`Collection '${this.collectionName}' created via fallback.`);
+        return true;
+      } catch {
+        return false;
       }
+    };
 
-      for (const candidate of hostCandidates) {
-        if (!candidate || candidate === originalHost) continue;
-        try {
-          const altClient = new QdrantClient({ url: candidate, apiKey: qdrantKey as string });
-          if (await tryCreate(altClient)) {
-            // switch to using this client going forward
-            this.client = altClient;
-            console.log(`Switched Qdrant host to '${candidate}' and created collection.`);
-            return;
-          }
-        } catch (err) {
-          // ignore and try next
-        }
-      }
+    if (await tryCreate(this.client)) return;
 
-      console.error('Error initializing Qdrant client or collection:', error.message ?? error);
-      throw error;
+    // Try host variants (strip port, force https)
+    const candidates: string[] = [];
+    try {
+      const parsed = new URL(originalHost);
+      parsed.port = '';
+      candidates.push(parsed.toString().replace(/\/$/, ''));
+      parsed.protocol = 'https:';
+      candidates.push(parsed.toString().replace(/\/$/, ''));
+    } catch {
+      if (originalHost) candidates.push(originalHost.replace(/:\d+/, ''));
     }
+
+    for (const candidate of candidates) {
+      if (!candidate || candidate === originalHost) continue;
+      const altClient = new QdrantClient({ url: candidate, apiKey: qdrantKey as string });
+      if (await tryCreate(altClient)) {
+        this.client = altClient;
+        console.log(`Switched Qdrant host to '${candidate}'.`);
+        return;
+      }
+    }
+
+    throw new Error('Could not initialize Qdrant collection after all fallback attempts.');
   }
 
-  // Method to add a document chunk with its embedding to Qdrant
-  async addChunk(id: string, chunkText: string, embedding: number[]): Promise<void> {
+  async batchAddChunks(chunks: QdrantChunk[]): Promise<void> {
+    if (!this.enabled || chunks.length === 0) return;
+
+    await this.client.upsert(this.collectionName, {
+      wait: true,
+      points: chunks.map(chunk => ({
+        id: chunk.id,
+        vector: chunk.embedding,
+        payload: {
+          text: chunk.text,
+          source: chunk.metadata?.source ?? '',
+          type: chunk.metadata?.type ?? '',
+          ...chunk.metadata,
+        },
+      })),
+    });
+    console.log(`Upserted ${chunks.length} chunks to Qdrant collection '${this.collectionName}'.`);
+  }
+
+  async addChunk(id: string, chunkText: string, embedding: number[], metadata?: Record<string, any>): Promise<void> {
+    if (!this.enabled) return;
+    await this.batchAddChunks([{ id, text: chunkText, embedding, metadata }]);
+  }
+
+  async deleteChunk(id: string): Promise<void> {
+    if (!this.enabled) return;
     try {
-      await this.client.upsert(this.collectionName, {
-        wait: true,
-        points: [
-          {
-            id: id,
-            vector: embedding,
-            payload: {
-              text: chunkText,
-            },
-          },
-        ],
-      });
-      console.log(`🧩 Chunk added to Qdrant: ${id}`);
+      await this.client.delete(this.collectionName, { wait: true, points: [id] });
     } catch (error: any) {
-      console.error(`Error adding chunk ${id} to Qdrant: ${error.message}`);
-      throw error;
+      console.error(`Error deleting chunk ${id} from Qdrant: ${error.message}`);
     }
   }
 
-  // Method to search for similar chunks
-  async search(queryEmbedding: number[], limit: number = 3): Promise<any[]> {
+  async deleteChunks(ids: string[]): Promise<void> {
+    if (!this.enabled || ids.length === 0) return;
     try {
-      const searchResult = await this.client.search(this.collectionName, {
+      await this.client.delete(this.collectionName, { wait: true, points: ids });
+      console.log(`Deleted ${ids.length} chunks from Qdrant.`);
+    } catch (error: any) {
+      console.error(`Error deleting chunks from Qdrant: ${error.message}`);
+    }
+  }
+
+  async search(queryEmbedding: number[], limit = 5): Promise<any[]> {
+    if (!this.enabled) return [];
+    try {
+      return await this.client.search(this.collectionName, {
         vector: queryEmbedding,
-        limit: limit,
+        limit,
         with_payload: true,
       });
-      return searchResult;
     } catch (error: any) {
       console.error('Error searching Qdrant:', error.message);
       throw error;

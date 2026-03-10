@@ -2,37 +2,36 @@ import { z } from 'zod';
 import { IngestorService } from '../../services/ingestorService.js';
 
 const schema = z.object({
-  filePath: z
+  feedUrl: z
     .string()
+    .url()
     .describe(
-      'Absolute or relative path to the file to ingest. ' +
-        'Supported formats: pdf, txt, md, docx, html, csv, xlsx, json, xml.'
+      'URL of the RSS 2.0 or Atom feed to ingest. ' +
+        'Each article is chunked and embedded individually.'
     ),
 });
 
-export const ingestFileTool = {
-  name: 'INGEST_FILE_TOOL',
+export const ingestRssTool = {
+  name: 'INGEST_RSS_TOOL',
   description:
-    'Parses a local file, chunks it, generates embeddings, and stores everything in the vector database. ' +
-    'Re-ingesting the same file content is safely deduplicated.',
+    'Fetches an RSS or Atom feed and ingests each article as chunked, embedded content. ' +
+    'Supports RSS 2.0 and Atom 1.0 formats. ' +
+    'Duplicate articles are automatically skipped on re-ingestion.',
   parameters: schema,
   execute: async (args: z.infer<typeof schema>) => {
-    console.log(`[INGEST_FILE_TOOL] Ingesting file: ${args.filePath}`);
+    console.log(`[INGEST_RSS_TOOL] Fetching feed: ${args.feedUrl}`);
 
     try {
       const service = new IngestorService();
-      const result = await service.ingestFile(args.filePath);
+      const result = await service.ingestRss(args.feedUrl);
       await service.close();
 
       if (result.ingestedCount === 0 && result.skippedCount === 0) {
-        return (
-          `No content could be extracted from: ${args.filePath}. ` +
-          `Check that the file format is supported and the file is not empty.`
-        );
+        return `Feed parsed but contained no usable content: ${args.feedUrl}`;
       }
 
       return [
-        `Ingestion complete for: ${args.filePath}`,
+        `RSS ingestion complete for: ${args.feedUrl}`,
         `  New chunks stored : ${result.ingestedCount}`,
         `  Duplicates skipped: ${result.skippedCount}`,
         result.chunkIds.length > 0
@@ -43,8 +42,8 @@ export const ingestFileTool = {
         .join('\n');
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[INGEST_FILE_TOOL] Error: ${message}`);
-      throw new Error(`Failed to ingest file: ${message}`);
+      console.error(`[INGEST_RSS_TOOL] Error: ${message}`);
+      throw new Error(`Failed to ingest RSS feed: ${message}`);
     }
   },
 };
