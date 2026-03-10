@@ -117,14 +117,14 @@ export interface TravelUrl {
     immigration: [
       { url: "https://www.uscis.gov/", description: "US Citizenship and Immigration Services" },
       { url: "https://www.cbp.gov/", description: "US Customs and Border Protection" },
-      { url: "https://www.gov.uk/government/organisations/uk-visas-and-immigration", description: "UK Visas and Immigration" },
-      { url: "https://www.canada.ca/en/immigration-refugees-citizenship.html", description: "Immigration, Refugees and Citizenship Canada" },
-      { url: "https://immi.homeaffairs.gov.au/", description: "Australian Immigration" },
-      { url: "https://www.immigration.govt.nz/", description: "Immigration New Zealand" },
-      { url: "https://ec.europa.eu/home-affairs/what-we-do/policies/borders-and-visas_en", description: "EU Immigration Portal" },
-      { url: "https://www.iatatravelcentre.com/", description: "IATA Travel Centre - Immigration Info" },
-      { url: "https://www.passportindex.org/", description: "Passport Index" },
-      { url: "https://www.projectvisa.com/", description: "Project Visa - Immigration Resources" }
+      // { url: "https://www.gov.uk/government/organisations/uk-visas-and-immigration", description: "UK Visas and Immigration" },
+      // { url: "https://www.canada.ca/en/immigration-refugees-citizenship.html", description: "Immigration, Refugees and Citizenship Canada" },
+      // { url: "https://immi.homeaffairs.gov.au/", description: "Australian Immigration" },
+      // { url: "https://www.immigration.govt.nz/", description: "Immigration New Zealand" },
+      // { url: "https://ec.europa.eu/home-affairs/what-we-do/policies/borders-and-visas_en", description: "EU Immigration Portal" },
+      // { url: "https://www.iatatravelcentre.com/", description: "IATA Travel Centre - Immigration Info" },
+      // { url: "https://www.passportindex.org/", description: "Passport Index" },
+      // { url: "https://www.projectvisa.com/", description: "Project Visa - Immigration Resources" }
     ],
   
     // TRAVEL INSURANCE

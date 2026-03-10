@@ -141,7 +141,7 @@ export class WebCrawler {
         'User-Agent': 'Mozilla/5.0 (compatible; MegaMind/1.0)',
       });
 
-      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       if (!response?.ok()) {
         console.warn(`Failed to fetch ${url}: status ${response?.status()}`);
         return null;
@@ -159,15 +159,15 @@ export class WebCrawler {
       const links: string[] = [];
       $('a[href]').each((_, el) => {
         const href = $(el).attr('href');
-        if (!href) return;
+        if (!href || href.startsWith('#')) return;
         try {
-          const abs = new URL(href, url).toString();
-          const parsed = new URL(abs);
+          const parsed = new URL(href, url);
+          parsed.hash = ''; // strip fragment
           if (
             parsed.origin === this.baseUrl.origin &&
             (parsed.protocol === 'http:' || parsed.protocol === 'https:')
           ) {
-            links.push(abs);
+            links.push(parsed.toString());
           }
         } catch {}
       });
