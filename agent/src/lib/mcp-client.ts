@@ -1,120 +1,166 @@
 /**
- * SocialMCPClient
+ * SocialMCPClient — v3
  *
- * Spawns the `social-mcp` package as a stdio sub-process and connects to it
- * using the Model Context Protocol SDK client.
+ * Improvement #8: Rate-limit handling with exponential backoff.
  *
- * social-mcp exposes these MCP tools (as of v1.3.x):
- *   Telegram : SEND_MESSAGE, GET_CHANNEL_INFO, FORWARD_MESSAGE,
- *              PIN_MESSAGE, GET_CHANNEL_MEMBERS
- *   Twitter  : SEND_TWEET, GET_USER_INFO, SEARCH_TWEETS
- *   Discord  : SEND_DISCORD_MESSAGE
- *   WhatsApp : SEND_WHATSAPP_MESSAGE, GET_WHATSAPP_MESSAGES
- *   Facebook : CREATE_FACEBOOK_POST
- *   Instagram: CREATE_INSTAGRAM_POST
- *   Slack    : SEND_SLACK_MESSAGE
- *
- * All platform credentials are forwarded from process.env to the child process.
+ * All tool calls are wrapped in a retry loop that detects 429 / rate-limit
+ * errors from social-mcp and backs off before retrying.
  */
 
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type Anthropic from '@anthropic-ai/sdk';
+import type { FunctionDeclaration } from '../tools/travel.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface MCPTool {
   name: string;
   description: string;
-  // JSON Schema object as returned by MCP list_tools
   inputSchema: Record<string, unknown>;
 }
 
-export type ToolCallResult =
-  | { type: 'text'; text: string }
-  | { type: 'image'; data: string; mimeType: string }
-  | { type: 'resource'; uri: string };
+type ToolCallContent = { type: string; text?: string };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Retry config ──────────────────────────────────────────────────────────────
 
-function resolveSocialMCPBin(): string {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
+const MAX_RETRIES  = 3;
+const BASE_DELAY_MS = 1_500;
 
-  // When installed as a dep: <agent>/node_modules/social-mcp/dist/index.js
-  return path.resolve(__dirname, '..', '..', 'node_modules', 'social-mcp', 'dist', 'index.js');
+function isRateLimitError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('rate limit') ||
+    lower.includes('too many requests') ||
+    lower.includes('429') ||
+    lower.includes('ratelimit') ||
+    lower.includes('slow down')
+  );
 }
 
-/** Convert an MCP tool list entry → Anthropic Tool definition */
-export function mcpToolToAnthropic(tool: MCPTool): Anthropic.Tool {
+async function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+// ── Schema sanitiser: JSON Schema → Gemini-compatible ─────────────────────────
+// Gemini doesn't support anyOf, oneOf, minLength, maxLength, etc.
+
+function sanitiseSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const out: Record<string, unknown> = {};
+
+  // Flatten anyOf by picking the first concrete type
+  if (Array.isArray(schema.anyOf)) {
+    const first = (schema.anyOf as Record<string, unknown>[])[0];
+    if (first?.type) out.type = first.type;
+    if (schema.description) out.description = schema.description;
+    return out;
+  }
+
+  // Copy only fields Gemini understands
+  const allowed = ['type', 'description', 'enum', 'format', 'nullable', 'properties', 'required', 'items'];
+  for (const key of allowed) {
+    if (key in schema) out[key] = schema[key];
+  }
+
+  if (out.properties && typeof out.properties === 'object') {
+    const sanitised: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(out.properties as Record<string, unknown>)) {
+      sanitised[k] = sanitiseSchema(v as Record<string, unknown>);
+    }
+    out.properties = sanitised;
+  }
+
+  if (out.items) {
+    out.items = sanitiseSchema(out.items as Record<string, unknown>);
+  }
+
+  return out;
+}
+
+// ── Converter: MCP tool → Gemini FunctionDeclaration ─────────────────────────
+
+export function mcpToolToGemini(tool: MCPTool): FunctionDeclaration {
+  const schema = sanitiseSchema(tool.inputSchema);
+  // Ensure top-level type is 'object' for Gemini
+  if (!schema.type) schema.type = 'object';
   return {
     name: tool.name,
     description: tool.description ?? '',
-    // MCP inputSchema is already a valid JSON Schema object
-    input_schema: tool.inputSchema as Anthropic.Tool['input_schema'],
+    parameters: schema as FunctionDeclaration['parameters'],
   };
 }
 
-// ── Client class ──────────────────────────────────────────────────────────────
+// ── Client ────────────────────────────────────────────────────────────────────
+
+function resolveBin(): string {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname  = path.dirname(__filename);
+  return path.resolve(__dirname, '..', '..', 'node_modules', 'social-mcp', 'dist', 'index.js');
+}
 
 export class SocialMCPClient {
   private client!: Client;
   private transport!: StdioClientTransport;
 
   async connect(): Promise<void> {
-    const binPath = resolveSocialMCPBin();
-
     this.transport = new StdioClientTransport({
       command: 'node',
-      args: [binPath],
-      // Forward all env vars so social-mcp can read platform credentials
+      args: [resolveBin()],
       env: process.env as Record<string, string>,
     });
 
     this.client = new Client(
-      { name: 'megamind-social-agent', version: '2.0.0' },
+      { name: 'megamind-social-agent', version: '3.0.0' },
       { capabilities: {} }
     );
 
     await this.client.connect(this.transport);
   }
 
-  /** Return tools as Anthropic-formatted tool definitions */
-  async listToolsAsAnthropic(): Promise<Anthropic.Tool[]> {
+  /** Return all social-mcp tools as Gemini FunctionDeclarations. */
+  async listToolsAsGemini(): Promise<FunctionDeclaration[]> {
     const { tools } = await this.client.listTools();
-    return (tools as MCPTool[]).map(mcpToolToAnthropic);
+    return (tools as MCPTool[]).map(mcpToolToGemini);
   }
 
-  /** Return raw MCP tool list (useful for logging) */
   async listTools(): Promise<MCPTool[]> {
     const { tools } = await this.client.listTools();
     return tools as MCPTool[];
   }
 
   /**
-   * Call a social-mcp tool by name.
-   * Returns the concatenated text of all text content blocks.
+   * Call a social-mcp tool with exponential-backoff retry on rate-limit errors.
+   * Returns concatenated text from the tool's content blocks.
    */
-  async callTool(
-    name: string,
-    toolInput: Record<string, unknown>
-  ): Promise<string> {
-    const result = await this.client.callTool({ name, arguments: toolInput });
+  async callTool(name: string, toolInput: Record<string, unknown>): Promise<string> {
+    let attempt = 0;
 
-    const textParts: string[] = [];
-    for (const block of result.content as ToolCallResult[]) {
-      if (block.type === 'text') {
-        textParts.push(block.text);
+    while (true) {
+      try {
+        const result = await this.client.callTool({ name, arguments: toolInput });
+        const text = (result.content as ToolCallContent[])
+          .filter((b) => b.type === 'text')
+          .map((b) => b.text ?? '')
+          .join('\n');
+
+        if (result.isError) throw new Error(text || 'social-mcp returned an error');
+        return text || '(no output)';
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        attempt++;
+
+        if (attempt >= MAX_RETRIES || !isRateLimitError(msg)) {
+          throw new Error(`[${name}] ${msg}`);
+        }
+
+        const delay = BASE_DELAY_MS * 2 ** (attempt - 1);
+        console.warn(`[mcp] Rate-limited on ${name}. Retrying in ${delay}ms (attempt ${attempt}/${MAX_RETRIES})`);
+        await sleep(delay);
       }
     }
-
-    if (result.isError) {
-      throw new Error(textParts.join('\n') || 'social-mcp returned an error');
-    }
-
-    return textParts.join('\n') || '(no output)';
   }
 
   async disconnect(): Promise<void> {

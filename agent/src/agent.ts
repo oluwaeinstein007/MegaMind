@@ -1,178 +1,182 @@
 /**
- * MegaMind Social Agent — agentic loop (v2)
+ * MegaMind Social Agent — Gemini function-calling loop (v3)
  *
- * Architecture
- * ────────────
- *  ┌──────────────────────────────────────────┐
- *  │            Claude (opus-4-6)             │
- *  │  tool_use ↓             ↑ tool_result    │
- *  └──────────────────────────────────────────┘
- *         │                       │
- *   social tools            travel tools
- *         │                       │
- *  ┌──────▼──────┐        ┌───────▼──────────┐
- *  │ social-mcp  │        │  MegaMind SQLite  │
- *  │  (via MCP   │        │  (direct query)   │
- *  │   stdio)    │        └──────────────────-┘
- *  └─────────────┘
- *
- * Social-media operations (tweet, telegram send, discord, slack, whatsapp,
- * facebook, instagram) are 100% delegated to the `social-mcp` npm package
- * running as an MCP stdio sub-process.
- *
- * Travel content (search / sample MegaMind's knowledge base) is handled
- * locally so posts are grounded in real ingested data.
+ * Uses Google Gemini (gemini-2.0-flash by default) with function calling.
+ * Social-media operations are delegated to the social-mcp package (stdio).
+ * Travel content, image gen, broadcast, and LinkedIn are handled locally.
+ * Conversation history is persisted to SQLite via memory.ts (#10).
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import {
+  GoogleGenerativeAI,
+  type Content,
+  type FunctionCall,
+  type FunctionDeclarationsTool,
+  type FunctionResponsePart,
+} from '@google/generative-ai';
 import { SocialMCPClient } from './lib/mcp-client.js';
 import { TRAVEL_TOOLS, TRAVEL_TOOL_NAMES, executeTravelTool } from './tools/travel.js';
+import { createSession, loadHistory, saveHistory } from './lib/memory.js';
 
-const MODEL = 'claude-opus-4-6';
+const DEFAULT_MODEL = 'gemini-2.0-flash';
 
-const SYSTEM_PROMPT = `You are the MegaMind Social Agent — an expert travel content creator and social media manager.
+const SYSTEM_INSTRUCTION = `You are the MegaMind Social Agent — an expert travel content creator and social media manager.
 
-## What you can do
-• Post and reply on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, and Instagram
-  (all via the social-mcp tools automatically available to you)
-• Search MegaMind's travel knowledge base to write accurate, data-backed posts
-  (search_travel_content, sample_travel_content)
+## Capabilities
+• Post and reply on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, and Instagram (via social-mcp tools)
+• Publish to LinkedIn (linkedin_post tool)
+• Search MegaMind's travel knowledge base (search_travel_content, sample_travel_content)
+• Generate travel images for Instagram (generate_image)
+• Broadcast to multiple platforms at once (broadcast_post)
 
 ## Rules
-1. Travel posts: ALWAYS call search_travel_content (or sample_travel_content) FIRST to
-   collect real facts before composing the post. Never invent visa rules, costs, or travel tips.
+1. For any travel post: ALWAYS call search_travel_content or sample_travel_content FIRST.
+   Never invent visa rules, costs, or travel tips — only use data from the tools.
 2. Platform tone:
-   - Twitter/X: concise, punchy, ≤ 280 chars, 2–3 hashtags
-   - Telegram / Discord / Slack: can be longer, use markdown formatting
-   - Facebook: professional, complete sentences
-   - Instagram: caption with emojis and 5–10 relevant hashtags; requires an image URL
-   - WhatsApp: personal, conversational tone
-3. After every successful post, confirm with the platform's returned post/message ID.
-4. If a credential is missing, report it clearly and tell the user which env var to set.
-5. When asked to post on multiple platforms, do them sequentially using separate tool calls.`;
-
-// ── Agent runner ──────────────────────────────────────────────────────────────
+   - Twitter/X: ≤ 280 chars, punchy, 2–3 hashtags
+   - Telegram / Discord / Slack: markdown formatting, can be longer
+   - Facebook / LinkedIn: professional, complete sentences
+   - Instagram: emoji-rich caption + 5–10 hashtags; always generate_image first
+   - WhatsApp: personal, conversational
+3. broadcast_post adapts the message per platform automatically.
+4. After every successful post, confirm with the returned post/message ID.
+5. If a credential is missing, say which env var to set rather than silently failing.
+6. You remember our conversation — refer to earlier context when relevant.`;
 
 export interface RunAgentOptions {
   verbose?: boolean;
+  sessionId?: string;
+}
+
+export interface RunAgentResult {
+  text: string;
+  sessionId: string;
 }
 
 /**
- * Run a full agentic turn.
- *
- * Opens a fresh social-mcp connection, runs the Claude tool-use loop until
- * stop_reason === 'end_turn', then closes the connection.
+ * Run one agentic turn with Gemini function-calling.
+ * Opens social-mcp, runs the loop, closes social-mcp, returns final text.
  */
 export async function runAgent(
   userPrompt: string,
   options: RunAgentOptions = {}
-): Promise<string> {
+): Promise<RunAgentResult> {
   const { verbose = false } = options;
 
-  // ── 1. Connect to social-mcp ────────────────────────────────────────────
+  // ── Session / memory ───────────────────────────────────────────────────────
+  const sessionId = options.sessionId ?? createSession();
+  const history   = loadHistory(sessionId);
+
+  // ── social-mcp connection ──────────────────────────────────────────────────
   const socialClient = new SocialMCPClient();
   await socialClient.connect();
 
   let socialToolNames: Set<string>;
-  let allTools: Anthropic.Tool[];
+  let socialGeminiTools: Awaited<ReturnType<typeof socialClient.listToolsAsGemini>>;
 
   try {
-    const socialTools = await socialClient.listToolsAsAnthropic();
-    socialToolNames = new Set(socialTools.map((t) => t.name));
-    // Combine: social-mcp tools + local travel tools
-    allTools = [...socialTools, ...TRAVEL_TOOLS];
-
-    if (verbose) {
-      console.error(
-        `[agent] social-mcp tools: ${[...socialToolNames].join(', ')}`
-      );
-    }
+    socialGeminiTools = await socialClient.listToolsAsGemini();
+    socialToolNames   = new Set(socialGeminiTools.map((t) => t.name));
+    if (verbose) console.error(`[agent] social-mcp tools: ${[...socialToolNames].join(', ')}`);
   } catch (err) {
     await socialClient.disconnect();
-    throw new Error(
-      `Failed to list tools from social-mcp: ${err instanceof Error ? err.message : err}`
-    );
+    throw new Error(`Failed to list social-mcp tools: ${(err as Error).message}`);
   }
 
-  // ── 2. Claude tool-use loop ─────────────────────────────────────────────
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userPrompt }];
+  // Combine all tool declarations into Gemini FunctionDeclarationsTool objects
+  const allTools: FunctionDeclarationsTool[] = [
+    { functionDeclarations: socialGeminiTools as FunctionDeclarationsTool['functionDeclarations'] },
+    { functionDeclarations: TRAVEL_TOOLS      as FunctionDeclarationsTool['functionDeclarations'] },
+  ];
+
+  // ── Gemini client ──────────────────────────────────────────────────────────
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not set.');
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: process.env.GEMINI_MODEL ?? DEFAULT_MODEL,
+    systemInstruction: SYSTEM_INSTRUCTION,
+    tools: allTools,
+  });
+
+  const chat = model.startChat({ history });
 
   try {
+    // ── Gemini function-calling loop ─────────────────────────────────────────
+    let currentPrompt: string | FunctionResponsePart[] = userPrompt;
+
     while (true) {
-      const response = await anthropic.messages.create({
-        model: MODEL,
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
-        tools: allTools,
-        messages,
-      });
+      const result = typeof currentPrompt === 'string'
+        ? await chat.sendMessage(currentPrompt)
+        : await chat.sendMessage(currentPrompt);
 
-      if (verbose) {
-        console.error(`[agent] stop_reason=${response.stop_reason}`);
+      const response = result.response;
+      const candidate = response.candidates?.[0];
+
+      if (!candidate) throw new Error('Gemini returned no candidates.');
+
+      const parts = candidate.content?.parts ?? [];
+
+      // Collect function calls from this turn
+      const functionCalls = parts
+        .filter((p): p is { functionCall: FunctionCall } => !!p.functionCall)
+        .map((p) => p.functionCall);
+
+      // No function calls → final text answer
+      if (functionCalls.length === 0) {
+        const text = parts
+          .filter((p): p is { text: string } => typeof p.text === 'string')
+          .map((p) => p.text)
+          .join('');
+
+        // Persist conversation history
+        const updatedHistory = await chat.getHistory();
+        saveHistory(sessionId, updatedHistory as Content[]);
+
+        return { text: text || '[No response]', sessionId };
       }
 
-      const textBlocks = response.content.filter(
-        (b): b is Anthropic.TextBlock => b.type === 'text'
-      );
+      // Execute function calls and collect responses
+      const functionResponses: FunctionResponsePart[] = [];
 
-      // Done — return final text
-      if (response.stop_reason === 'end_turn') {
-        return textBlocks.map((b) => b.text).join('\n');
-      }
+      for (const call of functionCalls) {
+        const { name, args } = call;
+        const input = (args ?? {}) as Record<string, unknown>;
 
-      if (response.stop_reason !== 'tool_use') {
-        return textBlocks.map((b) => b.text).join('\n') || '[No response]';
-      }
+        if (verbose) console.error(`\n[tool→] ${name}`, JSON.stringify(input, null, 2));
 
-      // Push assistant turn into history
-      messages.push({ role: 'assistant', content: response.content });
+        let responseContent: unknown;
 
-      // Execute every tool call in this turn
-      const toolUseBlocks = response.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
-      );
-
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-      for (const toolUse of toolUseBlocks) {
-        const input = toolUse.input as Record<string, unknown>;
-
-        if (verbose) {
-          console.error(`\n[tool→] ${toolUse.name}`, JSON.stringify(input, null, 2));
-        }
-
-        let result: string;
-
-        if (TRAVEL_TOOL_NAMES.has(toolUse.name)) {
-          // ── Local: travel content ────────────────────────────────────
-          result = executeTravelTool(toolUse.name, input);
-        } else if (socialToolNames.has(toolUse.name)) {
-          // ── Delegated: social-mcp ────────────────────────────────────
-          try {
-            result = await socialClient.callTool(toolUse.name, input);
-          } catch (err) {
-            result = JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            });
+        try {
+          if (TRAVEL_TOOL_NAMES.has(name)) {
+            // Local travel / utility tool
+            const raw = await executeTravelTool(
+              name,
+              input,
+              (toolName, toolArgs) => socialClient.callTool(toolName, toolArgs)
+            );
+            responseContent = JSON.parse(raw);
+          } else if (socialToolNames.has(name)) {
+            // Delegated to social-mcp
+            const text = await socialClient.callTool(name, input);
+            responseContent = { result: text };
+          } else {
+            responseContent = { error: `Unknown tool: ${name}` };
           }
-        } else {
-          result = JSON.stringify({ error: `Unknown tool: ${toolUse.name}` });
+        } catch (err) {
+          responseContent = { error: (err as Error).message };
         }
 
-        if (verbose) {
-          console.error(`[←tool] ${result.slice(0, 300)}`);
-        }
+        if (verbose) console.error(`[←tool] ${JSON.stringify(responseContent).slice(0, 300)}`);
 
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: result,
+        functionResponses.push({
+          functionResponse: { name, response: responseContent as Record<string, unknown> },
         });
       }
 
-      // Feed results back to Claude
-      messages.push({ role: 'user', content: toolResults });
+      // Feed all function responses back to Gemini in one turn
+      currentPrompt = functionResponses;
     }
   } finally {
     await socialClient.disconnect();
