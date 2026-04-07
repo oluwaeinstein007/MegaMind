@@ -12,7 +12,7 @@ services:
     ports:
       - "${WEBHOOK_PORT:-3456}:3456"
     volumes:
-      - ../dist:/data:ro          # MegaMind SQLite DB (read-only)
+      - ${MEGAMIND_DIST_PATH:-../dist}:/data:ro   # MegaMind SQLite DB (read-only)
       - agent-memory:/app/memory  # persistent session memory
 
 volumes:
