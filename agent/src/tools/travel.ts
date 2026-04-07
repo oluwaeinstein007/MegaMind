@@ -26,7 +26,7 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
   {
     name: 'search_travel_content',
     description:
-      "Search MegaMind's travel knowledge base for relevant content chunks. " +
+      "Search NomadSage's travel knowledge base for relevant content chunks. " +
       'Always call this before composing a travel post — it grounds content in ' +
       'real visa requirements, destination guides, budgets, and tips. ' +
       'Uses Qdrant semantic search when available, SQLite keyword search as fallback.',
@@ -48,7 +48,7 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
   {
     name: 'sample_travel_content',
     description:
-      "Return a random sample of travel chunks from MegaMind's database. " +
+      "Return a random sample of travel chunks from NomadSage's database. " +
       'Use when you need post inspiration without a specific topic in mind.',
     parameters: {
       type: 'object',
@@ -183,7 +183,7 @@ export async function executeTravelTool(
         return JSON.stringify({
           results: [],
           note: count === 0
-            ? 'MegaMind database is empty — run the MegaMind ingestor first.'
+            ? 'NomadSage database is empty — run the NomadSage ingestor first.'
             : `No matches for "${query}". Try broader keywords.`,
         });
       }
@@ -213,7 +213,7 @@ export async function executeTravelTool(
       const results = sampleTravelContent(limit);
 
       if (results.length === 0) {
-        return JSON.stringify({ results: [], note: 'MegaMind database is empty — run the ingestor first.' });
+        return JSON.stringify({ results: [], note: 'NomadSage database is empty — run the ingestor first.' });
       }
 
       return JSON.stringify({

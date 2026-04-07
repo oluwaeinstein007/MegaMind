@@ -29,7 +29,7 @@ function buildScheduledPrompt(): string {
     .join(' and ');
 
   return (
-    `Sample a random piece of travel content from MegaMind, ` +
+    `Sample a random piece of travel content from NomadSage, ` +
     `write an engaging post based on it, and publish it to ${platforms}. ` +
     `Use platform-appropriate tone and formatting.`
   );

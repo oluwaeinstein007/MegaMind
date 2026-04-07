@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MegaMind Social Agent — CLI entry point (v3)
+ * NomadSage — CLI entry point (v3)
  *
  * Starts:
  *   • Interactive REPL (always)
@@ -32,7 +32,7 @@ import { TelegramBot }                                   from './lib/telegram-bo
 function travelDbStatus(): string {
   try {
     const n = getTravelContentCount();
-    return n > 0 ? `${n} chunks` : 'empty (run MegaMind ingestor)';
+    return n > 0 ? `${n} chunks` : 'empty (run NomadSage ingestor)';
   } catch {
     return 'not found (set MEGAMIND_DB_PATH)';
   }
@@ -42,7 +42,7 @@ function printBanner(verbose: boolean): void {
   const model = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║        MegaMind Social Agent  v3.0  (Gemini + social-mcp)   ║
+║             NomadSage  v3.0  (Gemini + social-mcp)          ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  AI Model  : ${model.padEnd(46)}║
 ║  Travel DB : ${travelDbStatus().padEnd(46)}║
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
   const rl = readline.createInterface({
     input:  process.stdin,
     output: process.stdout,
-    prompt: 'agent> ',
+    prompt: 'nomadsage> ',
   });
 
   rl.prompt();

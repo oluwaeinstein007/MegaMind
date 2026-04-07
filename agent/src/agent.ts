@@ -1,5 +1,5 @@
 /**
- * MegaMind Social Agent — Gemini function-calling loop (v3)
+ * NomadSage — Gemini function-calling loop (v3)
  *
  * Uses Google Gemini (gemini-2.0-flash by default) with function calling.
  * Social-media operations are delegated to the social-mcp package (stdio).
@@ -20,12 +20,12 @@ import { createSession, loadHistory, saveHistory } from './lib/memory.js';
 
 const DEFAULT_MODEL = 'gemini-2.0-flash';
 
-const SYSTEM_INSTRUCTION = `You are the MegaMind Social Agent — an expert travel content creator and social media manager.
+const SYSTEM_INSTRUCTION = `You are NomadSage — an expert travel content creator and social media manager.
 
 ## Capabilities
 • Post and reply on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, and Instagram (via social-mcp tools)
 • Publish to LinkedIn (linkedin_post tool)
-• Search MegaMind's travel knowledge base (search_travel_content, sample_travel_content)
+• Search NomadSage's travel knowledge base (search_travel_content, sample_travel_content)
 • Generate travel images for Instagram (generate_image)
 • Broadcast to multiple platforms at once (broadcast_post)
 

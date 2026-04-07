@@ -1,5 +1,5 @@
 /**
- * MegaMind Telegram Bot — polling-based (Telegraf)
+ * NomadSage Telegram Bot — polling-based (Telegraf)
  *
  * Uses Telegraf's built-in long-polling (getUpdates) so no public URL,
  * no webhook registration, and no ngrok are needed for local or prod.
@@ -8,7 +8,7 @@
  *   • Private chats  — responds to every message
  *   • Groups         — only responds when @mentioned or replied to
  *   • Sessions       — one per chat (groups) or per user (DMs), keyed by
- *                      deterministic IDs backed by MegaMind's SQLite memory
+ *                      deterministic IDs backed by NomadSage's SQLite memory
  *   • Session expiry — conversation history is cleared after 30 min of inactivity
  */
 
@@ -90,7 +90,7 @@ export class TelegramBot {
 
   private groupIntro(mention: string): string {
     return (
-      `I'm MegaMind — your AI travel content & social media agent.\n` +
+      `I'm NomadSage — your AI travel content & social media agent.\n` +
       `Tag me (${mention}) or reply to my messages to chat!\n\n` +
       `I can post on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, Instagram & LinkedIn.`
     );
@@ -119,12 +119,12 @@ export class TelegramBot {
         ctx.reply(this.groupIntro(mention));
       } else {
         ctx.reply(
-          `Hello ${name}! I'm MegaMind, your AI travel content & social media agent.\n\n` +
+          `Hello ${name}! I'm NomadSage, your AI travel content & social media agent.\n\n` +
           `I can help you:\n` +
           `  Post & reply on Twitter/X\n` +
           `  Send messages on Telegram, Discord, Slack, WhatsApp\n` +
           `  Create posts on Facebook, Instagram & LinkedIn\n` +
-          `  Search & create travel content from the MegaMind knowledge base\n\n` +
+          `  Search & create travel content from the NomadSage knowledge base\n\n` +
           `Just send me a message. Use /clear to reset our conversation.`,
         );
       }
