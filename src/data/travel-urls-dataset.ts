@@ -117,14 +117,13 @@ export interface TravelUrl {
     immigration: [
       { url: "https://www.uscis.gov/", description: "US Citizenship and Immigration Services" },
       { url: "https://www.cbp.gov/", description: "US Customs and Border Protection" },
-      // { url: "https://www.gov.uk/government/organisations/uk-visas-and-immigration", description: "UK Visas and Immigration" },
-      // { url: "https://www.canada.ca/en/immigration-refugees-citizenship.html", description: "Immigration, Refugees and Citizenship Canada" },
-      // { url: "https://immi.homeaffairs.gov.au/", description: "Australian Immigration" },
-      // { url: "https://www.immigration.govt.nz/", description: "Immigration New Zealand" },
-      // { url: "https://ec.europa.eu/home-affairs/what-we-do/policies/borders-and-visas_en", description: "EU Immigration Portal" },
-      // { url: "https://www.iatatravelcentre.com/", description: "IATA Travel Centre - Immigration Info" },
-      // { url: "https://www.passportindex.org/", description: "Passport Index" },
-      // { url: "https://www.projectvisa.com/", description: "Project Visa - Immigration Resources" }
+      { url: "https://www.gov.uk/government/organisations/uk-visas-and-immigration", description: "UK Visas and Immigration" },
+      { url: "https://www.canada.ca/en/immigration-refugees-citizenship.html", description: "Immigration, Refugees and Citizenship Canada" },
+      { url: "https://immi.homeaffairs.gov.au/", description: "Australian Immigration" },
+      { url: "https://www.immigration.govt.nz/", description: "Immigration New Zealand" },
+      { url: "https://www.passportindex.org/", description: "Passport Index" },
+      { url: "https://www.henleypassportindex.com/", description: "Henley Passport Index" },
+      { url: "https://www.iatatravelcentre.com/", description: "IATA Travel Centre - Immigration Info" },
     ],
   
     // TRAVEL INSURANCE
@@ -187,7 +186,7 @@ export interface TravelUrl {
       { url: "https://www.nomadicmatt.com/", description: "Nomadic Matt - Budget Travel" },
       { url: "https://www.theplanetd.com/", description: "The Planet D - Adventure Travel" },
       { url: "https://www.earthtrekkers.com/", description: "Earth Trekkers" },
-      { url: "https://www.atlasobs cura.com/", description: "Atlas Obscura - Unique Destinations" },
+      { url: "https://www.atlasobscura.com/", description: "Atlas Obscura - Unique Destinations" },
       { url: "https://www.seat61.com/", description: "The Man in Seat 61 - Train Travel" }
     ],
   
@@ -313,7 +312,43 @@ export interface TravelUrl {
       { url: "https://www.visitdubai.com/", description: "Dubai Tourism" },
       { url: "https://www.southafrica.net/", description: "South Africa Tourism" },
       { url: "https://www.visitmexico.com/", description: "Mexico Tourism" },
-      { url: "https://www.visit-jordan.com/", description: "Jordan Tourism" }
+      { url: "https://www.visit-jordan.com/", description: "Jordan Tourism" },
+      { url: "https://www.visitportugal.com/en", description: "Portugal Tourism" },
+      { url: "https://www.visitgreece.gr/", description: "Greece Tourism" },
+      { url: "https://www.turismo.go.cr/", description: "Costa Rica Tourism" },
+      { url: "https://www.peru.travel/en", description: "Peru Tourism" },
+      { url: "https://www.indonesia.travel/", description: "Indonesia Tourism" },
+      { url: "https://www.vietnam.travel/", description: "Vietnam Tourism" },
+      { url: "https://www.visitsingapore.com/", description: "Singapore Tourism" },
+      { url: "https://www.experiencemorocco.com/", description: "Morocco Tourism" }
+    ],
+
+    // TRAVEL NEWS & BLOGS
+    travelNews: [
+      { url: "https://www.travelpulse.com/", description: "TravelPulse Industry News" },
+      { url: "https://skift.com/", description: "Skift - Travel Industry News" },
+      { url: "https://www.travelweekly.com/", description: "Travel Weekly Trade News" },
+      { url: "https://www.thepointsguy.com/", description: "The Points Guy - Miles & Travel" },
+      { url: "https://onemileatatime.com/", description: "One Mile at a Time - Aviation Blog" },
+      { url: "https://www.flyertalk.com/", description: "FlyerTalk - Frequent Flyer Forums" },
+      { url: "https://viewfromthewing.com/", description: "View from the Wing - Aviation News" },
+      { url: "https://www.liveandletsfly.com/", description: "Live and Let's Fly" },
+      { url: "https://upgradedpoints.com/", description: "Upgraded Points - Card & Travel Rewards" },
+      { url: "https://www.travelandleisure.com/", description: "Travel + Leisure Magazine" },
+      { url: "https://www.cntraveler.com/", description: "Conde Nast Traveler" },
+      { url: "https://www.outsideonline.com/adventure-travel/", description: "Outside - Adventure Travel" }
+    ],
+
+    // AIRPORT & TRANSIT INFO
+    airports: [
+      { url: "https://www.sleepinginairports.net/", description: "Sleeping in Airports Guide" },
+      { url: "https://www.prioritypass.com/", description: "Priority Pass Airport Lounges" },
+      { url: "https://www.airportia.com/", description: "Airportia - Flight Status" },
+      { url: "https://www.flightaware.com/", description: "FlightAware - Flight Tracking" },
+      { url: "https://www.tsa.gov/travel", description: "TSA Travel Information" },
+      { url: "https://www.cbp.gov/travel/us-citizens", description: "US Customs Travel Info" },
+      { url: "https://www.heathrow.com/", description: "London Heathrow Airport" },
+      { url: "https://www.changiairport.com/", description: "Singapore Changi Airport" }
     ]
   };
   
@@ -354,10 +389,6 @@ export interface TravelUrl {
     urlsByCategory: getUrlCountByCategory()
   };
   
-  console.log('📥 Travel URLs Dataset loaded successfully!');
-  console.log(`📚 Total Categories: ${datasetStats.totalCategories}`);
-  console.log(`🔗 Total URLs: ${datasetStats.totalUrls}`);
-  console.log('🗂️ Categories:', getCategories().join(', '));
 
 
   // Example usage:  // console.log(getUrlsByCategory('visa'));

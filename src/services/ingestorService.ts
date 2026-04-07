@@ -58,6 +58,26 @@ function normalizeUrl(raw: string): string {
   return url;
 }
 
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  baseDelayMs = 1000,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries - 1) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export class IngestorService {
   private documentParser: DocumentParser;
   private databaseService: DatabaseService;
@@ -68,7 +88,7 @@ export class IngestorService {
   private readonly defaultMaxDepth = 2;
   private readonly defaultRateLimitMs = 500;
   private readonly embeddingBatchSize: number;
-  private readonly vectorSize: number;
+  private readonly embeddingInterBatchDelayMs: number;
 
   constructor() {
     this.documentParser = new DocumentParser();
@@ -76,8 +96,8 @@ export class IngestorService {
     this.textSplitter = new TextSplitter();
     this.embeddings = createEmbeddings();
     this.qdrantService = new QdrantService();
-    this.embeddingBatchSize = parseInt(process.env.EMBEDDING_BATCH_SIZE || '50', 10);
-    this.vectorSize = parseInt(process.env.EMBEDDING_VECTOR_SIZE || '1536', 10);
+    this.embeddingBatchSize = parseInt(process.env.EMBEDDING_BATCH_SIZE || '100', 10);
+    this.embeddingInterBatchDelayMs = parseInt(process.env.EMBEDDING_INTER_BATCH_DELAY_MS || '200', 10);
   }
 
   async initialize(): Promise<void> {
@@ -93,23 +113,28 @@ export class IngestorService {
   // ---------------------------------------------------------------------------
 
   private async batchIngestChunks(
-    rawChunks: Array<{ content: string; source: string; type: string; metadata: any }>
+    rawChunks: Array<{ content: string; source: string; type: string; metadata: any }>,
+    options: { refresh?: boolean } = {}
   ): Promise<IngestionResult> {
     if (rawChunks.length === 0) {
       return { ingestedCount: 0, skippedCount: 0, chunkIds: [] };
     }
 
-    // 1. Compute hashes and filter out duplicates
+    // 1. Compute hashes; in refresh mode skip dedup check (old chunks already deleted)
     const withHashes = rawChunks.map(chunk => ({
       ...chunk,
       hash: generateHash(chunk.source, chunk.content),
     }));
 
-    const allHashes = withHashes.map(c => c.hash);
-    const existingHashes = this.databaseService.batchHashExists(allHashes);
+    let newChunks = withHashes;
+    let skippedCount = 0;
 
-    const newChunks = withHashes.filter(c => !existingHashes.has(c.hash));
-    const skippedCount = withHashes.length - newChunks.length;
+    if (!options.refresh) {
+      const allHashes = withHashes.map(c => c.hash);
+      const existingHashes = this.databaseService.batchHashExists(allHashes);
+      newChunks = withHashes.filter(c => !existingHashes.has(c.hash));
+      skippedCount = withHashes.length - newChunks.length;
+    }
 
     if (newChunks.length === 0) {
       console.log(`All ${rawChunks.length} chunks already exist in the database, skipping.`);
@@ -118,23 +143,37 @@ export class IngestorService {
 
     console.log(`Embedding ${newChunks.length} new chunk(s) (${skippedCount} duplicate(s) skipped)...`);
 
-    // 2. Batch embed (in groups to respect API rate limits)
+    // 2. Batch embed with retry + inter-batch delay
     const allEmbeddings: number[][] = [];
+    const totalBatches = Math.ceil(newChunks.length / this.embeddingBatchSize);
     for (let i = 0; i < newChunks.length; i += this.embeddingBatchSize) {
       const batch = newChunks.slice(i, i + this.embeddingBatchSize);
+      const batchNum = Math.floor(i / this.embeddingBatchSize) + 1;
       try {
-        const embeddings = await this.embeddings.embedDocuments(batch.map(c => c.content));
+        const embeddings = await withRetry(
+          () => this.embeddings.embedDocuments(batch.map(c => c.content)),
+          3,
+          1000,
+        );
         allEmbeddings.push(...embeddings);
       } catch (err: any) {
         console.warn(
-          `Embedding batch ${Math.floor(i / this.embeddingBatchSize) + 1} failed: ${err?.message ?? err}. Using zero vectors.`
+          `Embedding batch ${batchNum}/${totalBatches} failed after retries: ${err?.message ?? err}. Skipping ${batch.length} chunk(s).`
         );
-        allEmbeddings.push(...batch.map(() => new Array(this.vectorSize).fill(0)));
+        // Push sentinel zeros so array indices stay aligned; these won't be stored
+        allEmbeddings.push(...batch.map(() => null as unknown as number[]));
+      }
+      if (i + this.embeddingBatchSize < newChunks.length && this.embeddingInterBatchDelayMs > 0) {
+        await new Promise(r => setTimeout(r, this.embeddingInterBatchDelayMs));
       }
     }
 
-    // 3. Build batch records with deterministic UUIDs derived from content hash
-    const dbChunks: BatchChunk[] = newChunks.map(chunk => ({
+    // 3. Filter out chunks where embedding failed, build batch records
+    const validPairs = newChunks
+      .map((chunk, i) => ({ chunk, embedding: allEmbeddings[i] }))
+      .filter(p => p.embedding !== null);
+
+    const dbChunks: BatchChunk[] = validPairs.map(({ chunk }) => ({
       chunkId: hashToUUID(chunk.hash),
       source: chunk.source,
       type: chunk.type,
@@ -151,7 +190,7 @@ export class IngestorService {
       dbChunks.map((chunk, i) => ({
         id: chunk.chunkId,
         text: chunk.content ?? '',
-        embedding: allEmbeddings[i],
+        embedding: validPairs[i].embedding,
         metadata: {
           source: chunk.source,
           type: chunk.type,
@@ -171,7 +210,7 @@ export class IngestorService {
 
   async ingestUrl(
     url: string,
-    options?: { maxDepth?: number; useSitemap?: boolean }
+    options?: { maxDepth?: number; useSitemap?: boolean; refresh?: boolean }
   ): Promise<IngestionResult> {
     await this.initialize();
 
@@ -194,6 +233,15 @@ export class IngestorService {
     for (const [pageUrl, pageData] of crawledPages) {
       if (!pageData.content) continue;
 
+      // In refresh mode, delete stale chunks for this page before re-ingesting
+      if (options?.refresh) {
+        const deleted = await this.databaseService.deleteByOriginalUrl(pageUrl);
+        if (deleted.count > 0) {
+          if (deleted.chunkIds.length > 0) await this.qdrantService.deleteChunks(deleted.chunkIds);
+          console.log(`Refresh: removed ${deleted.count} stale chunk(s) for ${pageUrl}`);
+        }
+      }
+
       const chunks = await this.textSplitter.splitText(pageData.content);
       for (let i = 0; i < chunks.length; i++) {
         rawChunks.push({
@@ -210,7 +258,7 @@ export class IngestorService {
       }
     }
 
-    return this.batchIngestChunks(rawChunks);
+    return this.batchIngestChunks(rawChunks, { refresh: options?.refresh });
   }
 
   async ingestFile(filePath: string): Promise<IngestionResult> {

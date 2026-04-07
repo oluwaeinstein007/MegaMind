@@ -29,14 +29,18 @@ interface Args {
   depth: number;
   concurrency: number;
   dryRun: boolean;
+  refresh: boolean;
+  sitemap: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
   const args = argv.slice(2);
   let category: string | undefined;
-  let depth = 1;
-  let concurrency = 3;
+  let depth = 2;
+  let concurrency = 5;
   let dryRun = false;
+  let refresh = false;
+  let sitemap = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--category' && args[i + 1]) {
@@ -47,10 +51,14 @@ function parseArgs(argv: string[]): Args {
       concurrency = parseInt(args[++i], 10);
     } else if (args[i] === '--dry-run') {
       dryRun = true;
+    } else if (args[i] === '--refresh') {
+      refresh = true;
+    } else if (args[i] === '--sitemap') {
+      sitemap = true;
     }
   }
 
-  return { category, depth, concurrency, dryRun };
+  return { category, depth, concurrency, dryRun, refresh, sitemap };
 }
 
 async function runWithConcurrency<T>(
@@ -72,7 +80,7 @@ async function runWithConcurrency<T>(
 }
 
 async function main() {
-  const { category, depth, concurrency, dryRun } = parseArgs(process.argv);
+  const { category, depth, concurrency, dryRun, refresh, sitemap } = parseArgs(process.argv);
 
   const categories = getCategories();
 
@@ -90,6 +98,8 @@ async function main() {
   console.log(`  URLs       : ${entries.length}`);
   console.log(`  Depth      : ${depth}`);
   console.log(`  Concurrency: ${concurrency}`);
+  console.log(`  Refresh    : ${refresh}`);
+  console.log(`  Sitemap    : ${sitemap}`);
   if (dryRun) console.log(`  Mode       : DRY RUN`);
   console.log('');
 
@@ -108,13 +118,13 @@ async function main() {
       const label = `[${i + 1}/${entries.length}] ${entry.description}`;
       process.stdout.write(`${label} ... `);
       try {
-        const result = await service.ingestUrl(entry.url, { maxDepth: depth });
-        process.stdout.write(`✓ +${result.ingestedCount} (skip ${result.skippedCount})\n`);
+        const result = await service.ingestUrl(entry.url, { maxDepth: depth, refresh, useSitemap: sitemap });
+        process.stdout.write(`+${result.ingestedCount} (skip ${result.skippedCount})\n`);
         totalIngested += result.ingestedCount;
         totalSkipped += result.skippedCount;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        process.stdout.write(`✗ ${msg}\n`);
+        process.stdout.write(`FAIL ${msg}\n`);
         failed++;
       }
     });

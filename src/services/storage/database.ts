@@ -213,6 +213,35 @@ export class DatabaseService {
     return { chunkId: row.chunkId, deleted: true };
   }
 
+  async deleteByOriginalUrl(originalUrl: string): Promise<{ chunkIds: string[]; count: number }> {
+    if (this.usingInMemory) {
+      const toDelete: number[] = [];
+      const chunkIds: string[] = [];
+      for (const [id, row] of this.inMemoryStore) {
+        try {
+          const meta = JSON.parse(row.metadata);
+          if (meta.originalUrl === originalUrl) {
+            toDelete.push(id);
+            if (row.chunkId) chunkIds.push(row.chunkId);
+            if (row.content_hash) this.inMemoryHashes.delete(row.content_hash);
+          }
+        } catch {}
+      }
+      for (const id of toDelete) this.inMemoryStore.delete(id);
+      return { chunkIds, count: toDelete.length };
+    }
+
+    if (!this.db) throw new Error('Database not initialized.');
+    const rows = this.db
+      .prepare("SELECT chunkId FROM documents WHERE json_extract(metadata, '$.originalUrl') = ?")
+      .all(originalUrl) as Array<{ chunkId: string | null }>;
+    const chunkIds = rows.map(r => r.chunkId).filter(Boolean) as string[];
+    const result = this.db
+      .prepare("DELETE FROM documents WHERE json_extract(metadata, '$.originalUrl') = ?")
+      .run(originalUrl);
+    return { chunkIds, count: result.changes };
+  }
+
   async deleteBySource(source: string): Promise<{ chunkIds: string[]; count: number }> {
     if (this.usingInMemory) {
       const toDelete: number[] = [];
