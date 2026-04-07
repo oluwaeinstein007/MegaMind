@@ -8,6 +8,7 @@
  *   • WhatsApp (Cloud API webhook)
  *
  * On every incoming message, the agent is invoked to generate and send a reply.
+ * Each Telegram chat gets its own persistent session (telegram-<chatId>).
  *
  * Config (env vars):
  *   WEBHOOK_PORT    HTTP port (default: 3456)
@@ -17,26 +18,36 @@
 
 import express, { type Request, type Response } from 'express';
 
-export type AgentRunner = (prompt: string) => Promise<string>;
+/** Agent runner accepts an optional session ID so callers can maintain per-chat context. */
+export type AgentRunner = (prompt: string, sessionId?: string) => Promise<string>;
 
 const DEFAULT_PORT = 3456;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function extractTextAndContext(platform: string, body: Record<string, unknown>): string | null {
+interface ExtractResult {
+  prompt: string;
+  sessionId?: string;
+}
+
+function extractTextAndContext(platform: string, body: Record<string, unknown>): ExtractResult | null {
   try {
     switch (platform) {
       case 'telegram': {
         const msg = (body.message ?? body.channel_post) as Record<string, unknown> | undefined;
         if (!msg?.text) return null;
-        const chatId  = (msg.chat as Record<string, unknown>)?.id;
-        const msgId   = msg.message_id;
+        const chatId   = (msg.chat as Record<string, unknown>)?.id;
+        const msgId    = msg.message_id;
         const fromUser = ((msg.from as Record<string, unknown>)?.username ?? 'user');
-        return (
-          `Incoming Telegram message from @${fromUser} in chat ${chatId} (message_id: ${msgId}): ` +
-          `"${msg.text}". ` +
-          `Reply to this message using telegram_reply with chat_id=${chatId} and message_id=${msgId}.`
-        );
+        return {
+          prompt: (
+            `Incoming Telegram message from @${fromUser} in chat ${chatId} (message_id: ${msgId}): ` +
+            `"${msg.text}". ` +
+            `Reply to this message using telegram_reply with chat_id=${chatId} and message_id=${msgId}.`
+          ),
+          // Each Telegram chat gets its own conversation session
+          sessionId: `telegram-${chatId}`,
+        };
       }
 
       case 'slack': {
@@ -45,35 +56,41 @@ function extractTextAndContext(platform: string, body: Record<string, unknown>):
         const channel = event.channel;
         const ts      = event.ts;
         const text    = event.text;
-        return (
-          `Incoming Slack message in channel ${channel} (thread_ts: ${ts}): "${text}". ` +
-          `Reply in the thread using slack_reply with channel=${channel} and thread_ts=${ts}.`
-        );
+        return {
+          prompt: (
+            `Incoming Slack message in channel ${channel} (thread_ts: ${ts}): "${text}". ` +
+            `Reply in the thread using SEND_SLACK_MESSAGE with channel=${channel} and thread_ts=${ts}.`
+          ),
+        };
       }
 
       case 'discord': {
-        const content = (body as Record<string, unknown>).content;
+        const content   = (body as Record<string, unknown>).content;
         const channelId = (body as Record<string, unknown>).channel_id;
         const messageId = (body as Record<string, unknown>).id;
         if (!content || !channelId) return null;
-        return (
-          `Incoming Discord message in channel ${channelId} (message_id: ${messageId}): "${content}". ` +
-          `Reply using discord_reply with channel_id=${channelId} and message_id=${messageId}.`
-        );
+        return {
+          prompt: (
+            `Incoming Discord message in channel ${channelId} (message_id: ${messageId}): "${content}". ` +
+            `Reply using SEND_DISCORD_MESSAGE with channel_id=${channelId}.`
+          ),
+        };
       }
 
       case 'whatsapp': {
-        const entry = ((body.entry as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
+        const entry   = ((body.entry as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
         const changes = ((entry?.changes as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
-        const value = changes?.value as Record<string, unknown> | undefined;
+        const value   = changes?.value as Record<string, unknown> | undefined;
         const message = ((value?.messages as unknown[]) ?? [])[0] as Record<string, unknown> | undefined;
         if (!message) return null;
         const from = message.from;
         const text = (message.text as Record<string, unknown>)?.body;
-        return (
-          `Incoming WhatsApp message from ${from}: "${text}". ` +
-          `Reply using whatsapp_send with to=${from}.`
-        );
+        return {
+          prompt: (
+            `Incoming WhatsApp message from ${from}: "${text}". ` +
+            `Reply using SEND_WHATSAPP_MESSAGE with to=${from}.`
+          ),
+        };
       }
 
       default:
@@ -114,15 +131,17 @@ export function createWebhookServer(runAgent: AgentRunner): express.Application 
         return;
       }
 
-      // Acknowledge quickly (async processing below)
+      // Acknowledge quickly (Telegram requires a response within 5 s)
       res.status(200).json({ ok: true });
 
-      const prompt = extractTextAndContext(platform, req.body as Record<string, unknown>);
-      if (!prompt) return;
+      const extracted = extractTextAndContext(platform, req.body as Record<string, unknown>);
+      if (!extracted) return;
 
-      console.log(`[webhook/${platform}] incoming message — running agent`);
+      const { prompt, sessionId } = extracted;
+      console.log(`[webhook/${platform}] incoming message${sessionId ? ` (session: ${sessionId})` : ''} — running agent`);
+
       try {
-        const result = await runAgent(prompt);
+        const result = await runAgent(prompt, sessionId);
         console.log(`[webhook/${platform}] agent reply:`, result.slice(0, 200));
       } catch (err) {
         console.error(`[webhook/${platform}] agent error:`, (err as Error).message);
@@ -152,4 +171,40 @@ export function startWebhookServer(runAgent: AgentRunner): void {
     console.log(`           POST /webhook/whatsapp`);
     console.log(`           GET  /health`);
   });
+}
+
+/**
+ * Register this server as the Telegram bot webhook.
+ * Call this once after the server is publicly reachable.
+ *
+ * @param publicUrl  Base URL of your server, e.g. "https://xxxx.ngrok.io"
+ */
+export async function registerTelegramWebhook(publicUrl: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
+
+  const webhookUrl = `${publicUrl.replace(/\/$/, '')}/webhook/telegram`;
+
+  const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+  });
+
+  const data = await res.json() as Record<string, unknown>;
+  if (!data.ok) throw new Error(String(data.description ?? 'setWebhook failed'));
+
+  console.log(`[webhook] Telegram webhook registered → ${webhookUrl}`);
+}
+
+/**
+ * Fetch the currently registered Telegram webhook info.
+ */
+export async function getTelegramWebhookInfo(): Promise<Record<string, unknown>> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not set');
+
+  const res  = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+  const data = await res.json() as Record<string, unknown>;
+  return (data.result ?? data) as Record<string, unknown>;
 }

@@ -4,7 +4,8 @@
  *
  * Starts:
  *   • Interactive REPL (always)
- *   • Webhook server   (if WEBHOOK_ENABLED=true)
+ *   • Telegram bot     (polling, if TELEGRAM_BOT_TOKEN set)
+ *   • Webhook server   (Slack/Discord/WhatsApp, if WEBHOOK_ENABLED=true)
  *   • Cron scheduler   (if SCHEDULER_ENABLED=true)
  *   • Twitter monitor  (if TWITTER_MONITOR_HANDLE set)
  *
@@ -22,8 +23,9 @@ import { printCredentialReport, hasMinimumCredentials } from './lib/credentials.
 import { createSession, listSessions, clearSession }    from './lib/memory.js';
 import { getTravelContentCount }                         from './lib/megamind.js';
 import { startScheduler, stopScheduler, triggerNow }    from './lib/scheduler.js';
-import { startWebhookServer }                            from './lib/webhook.js';
+import { startWebhookServer } from './lib/webhook.js';
 import { startMonitoring, stopMonitoring }               from './lib/monitoring.js';
+import { TelegramBot }                                   from './lib/telegram-bot.js';
 
 // ── Banner ────────────────────────────────────────────────────────────────────
 
@@ -135,11 +137,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Create a top-level agent runner bound to verbose flag
-  const agentRunner = (prompt: string, sessionId?: string) =>
+  // Create a top-level agent runner bound to verbose flag (sessionId supported for per-chat context)
+  const agentRunner = (prompt: string, sessionId?: string): Promise<string> =>
     runAgent(prompt, { verbose, sessionId }).then((r) => r.text);
 
   // ── Optional background services ──────────────────────────────────────────
+
+  // Telegram polling bot (no public URL needed)
+  let telegramBot: TelegramBot | null = null;
+  if (process.env.TELEGRAM_BOT_TOKEN) {
+    telegramBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, agentRunner);
+    telegramBot.start().catch((err) => {
+      console.error('[telegram-bot] Failed to start:', (err as Error).message);
+    });
+  }
+
+  // Webhook server for Slack / Discord / WhatsApp
   if (process.env.WEBHOOK_ENABLED === 'true') {
     startWebhookServer(agentRunner);
   }
@@ -153,8 +166,8 @@ async function main(): Promise<void> {
   }
 
   // Graceful shutdown
-  process.on('SIGINT',  () => { stopScheduler(); stopMonitoring(); console.log('\nGoodbye!'); process.exit(0); });
-  process.on('SIGTERM', () => { stopScheduler(); stopMonitoring(); process.exit(0); });
+  process.on('SIGINT',  () => { telegramBot?.stop(); stopScheduler(); stopMonitoring(); console.log('\nGoodbye!'); process.exit(0); });
+  process.on('SIGTERM', () => { telegramBot?.stop(); stopScheduler(); stopMonitoring(); process.exit(0); });
 
   // ── --trigger-now: fire once and exit ─────────────────────────────────────
   if (triggerNow_) {

@@ -124,6 +124,31 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
       required: ['text'],
     },
   },
+  {
+    name: 'telegram_reply',
+    description:
+      'Send a reply to a specific Telegram message. Use this when you receive an incoming ' +
+      'Telegram message and want to reply directly to it (quoted reply). ' +
+      'If message_id is omitted the message is sent without quoting.',
+    parameters: {
+      type: 'object',
+      properties: {
+        chat_id: {
+          type: 'string',
+          description: 'The Telegram chat ID or @username of the chat.',
+        },
+        text: {
+          type: 'string',
+          description: 'The reply text to send.',
+        },
+        message_id: {
+          type: 'number',
+          description: 'The ID of the message to reply to (for quoted replies). Optional.',
+        },
+      },
+      required: ['chat_id', 'text'],
+    },
+  },
 ];
 
 // ── Names set for routing ─────────────────────────────────────────────────────
@@ -302,6 +327,39 @@ export async function executeTravelTool(
       } catch (err) {
         return JSON.stringify({ error: (err as Error).message });
       }
+    }
+
+    // ── telegram_reply ───────────────────────────────────────────────────────
+    case 'telegram_reply': {
+      const chatId    = String(input.chat_id ?? '').trim();
+      const text      = String(input.text ?? '').trim();
+      const messageId = typeof input.message_id === 'number'
+        ? input.message_id
+        : input.message_id ? parseInt(String(input.message_id), 10) : undefined;
+
+      if (!chatId || !text) return JSON.stringify({ error: 'chat_id and text are required' });
+
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) return JSON.stringify({ error: 'TELEGRAM_BOT_TOKEN not set' });
+
+      const payload: Record<string, unknown> = { chat_id: chatId, text };
+      if (messageId) payload.reply_to_message_id = messageId;
+
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json() as Record<string, unknown>;
+      if (!data.ok) return JSON.stringify({ error: data.description ?? 'Telegram API error' });
+
+      const msg = data.result as Record<string, unknown>;
+      return JSON.stringify({
+        success: true,
+        message_id: msg.message_id,
+        chat_id: chatId,
+      });
     }
 
     default:

@@ -100,7 +100,7 @@ async function embedQuery(query: string): Promise<number[] | null> {
     try {
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-      const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+      const model = genAI.getGenerativeModel({ model: process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001' });
       const result = await model.embedContent(query);
       return result.embedding.values;
     } catch (err) {

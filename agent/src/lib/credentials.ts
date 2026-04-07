@@ -12,19 +12,27 @@ export interface PlatformStatus {
   missing: string[];
 }
 
-const PLATFORM_VARS: Record<string, string[]> = {
-  Gemini:    ['GEMINI_API_KEY'],
-  Twitter:   ['TWITTER_APP_KEY', 'TWITTER_APP_SECRET', 'TWITTER_ACCESS_TOKEN', 'TWITTER_ACCESS_SECRET'],
-  Telegram:  ['TELEGRAM_BOT_TOKEN'],
-  Discord:   ['DISCORD_BOT_TOKEN'],
-  Slack:     ['SLACK_BOT_TOKEN'],
-  WhatsApp:  ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID'],
-  Facebook:  ['FACEBOOK_ACCESS_TOKEN', 'FACEBOOK_PAGE_ID'],
-  Instagram: ['INSTAGRAM_ACCESS_TOKEN', 'INSTAGRAM_ACCOUNT_ID'],
-  LinkedIn:  ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_USER_ID'],
-  Qdrant:    ['QDRANT_HOST', 'QDRANT_KEY'],
-  OpenAI:    ['OPENAI_API_KEY'],     // only needed for Qdrant embedding
-};
+function buildPlatformVars(): Record<string, string[]> {
+  const vars: Record<string, string[]> = {
+    Gemini:    ['GEMINI_API_KEY'],
+    Twitter:   ['TWITTER_APP_KEY', 'TWITTER_APP_SECRET', 'TWITTER_ACCESS_TOKEN', 'TWITTER_ACCESS_SECRET'],
+    Telegram:  ['TELEGRAM_BOT_TOKEN'],
+    Discord:   ['DISCORD_BOT_TOKEN'],
+    Slack:     ['SLACK_BOT_TOKEN'],
+    WhatsApp:  ['WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID'],
+    Facebook:  ['FACEBOOK_ACCESS_TOKEN', 'FACEBOOK_PAGE_ID'],
+    Instagram: ['INSTAGRAM_ACCESS_TOKEN', 'INSTAGRAM_ACCOUNT_ID'],
+    LinkedIn:  ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_USER_ID'],
+    Qdrant:    ['QDRANT_HOST', 'QDRANT_KEY'],
+  };
+  // OpenAI is only required when using openai as the embedding provider
+  if ((process.env.EMBEDDING_PROVIDER ?? 'openai').toLowerCase() === 'openai') {
+    vars['OpenAI'] = ['OPENAI_API_KEY'];
+  }
+  return vars;
+}
+
+const PLATFORM_VARS = buildPlatformVars();
 
 /** Check all platform credentials and return per-platform status. */
 export function validateCredentials(): PlatformStatus[] {

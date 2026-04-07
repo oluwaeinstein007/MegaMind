@@ -1,0 +1,19 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: megamind-agent:latest
+    container_name: megamind-agent
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    env_file: .env
+    ports:
+      - "${WEBHOOK_PORT:-3456}:3456"
+    volumes:
+      - ../dist:/data:ro          # MegaMind SQLite DB (read-only)
+      - agent-memory:/app/memory  # persistent session memory
+
+volumes:
+  agent-memory:
