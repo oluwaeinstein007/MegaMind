@@ -251,16 +251,6 @@ export interface TravelUrl {
       { url: "https://www.clubmed.us/", description: "Club Med All-Inclusive" }
     ],
   
-    // LANGUAGE & TRANSLATION
-    language: [
-      { url: "https://translate.google.com/", description: "Google Translate" },
-      { url: "https://www.duolingo.com/", description: "Duolingo Language Learning" },
-      { url: "https://www.babbel.com/", description: "Babbel Language Courses" },
-      { url: "https://www.rosettastone.com/", description: "Rosetta Stone" },
-      { url: "https://www.italki.com/", description: "iTalki Language Tutors" },
-      { url: "https://www.memrise.com/", description: "Memrise Language App" }
-    ],
-  
     // LOYALTY & REWARDS
     loyalty: [
       { url: "https://www.aa.com/aadvantage", description: "American Airlines AAdvantage" },
