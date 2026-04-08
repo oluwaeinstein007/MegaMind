@@ -1,10 +1,11 @@
 /**
- * NomadSage — Gemini function-calling loop (v3)
+ * NomadSage Travel Advisor — Gemini function-calling loop
  *
- * Uses Google Gemini (gemini-2.0-flash by default) with function calling.
- * Social-media operations are delegated to the social-mcp package (stdio).
- * Travel content, image gen, broadcast, and LinkedIn are handled locally.
- * Conversation history is persisted to SQLite via memory.ts (#10).
+ * A travel advisory agent powered by Google Gemini.
+ * Answers questions grounded in the MegaMind knowledge base with source citations.
+ *
+ * Social platform replies (Twitter, Telegram, Discord, Slack, WhatsApp) are
+ * delegated to social-mcp — no custom platform clients are built here.
  */
 
 import {
@@ -20,28 +21,40 @@ import { createSession, loadHistory, saveHistory } from './lib/memory.js';
 
 const DEFAULT_MODEL = 'gemini-2.0-flash';
 
-const SYSTEM_INSTRUCTION = `You are NomadSage — an expert travel content creator and social media manager.
+const SYSTEM_INSTRUCTION = `You are NomadSage — an expert AI travel advisor with deep knowledge of destinations, visa requirements, immigration processes, travel budgets, safety, and cultural tips worldwide.
 
-## Capabilities
-• Post and reply on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, and Instagram (via social-mcp tools)
-• Publish to LinkedIn (linkedin_post tool)
-• Search NomadSage's travel knowledge base (search_travel_content, sample_travel_content)
-• Generate travel images for Instagram (generate_image)
-• Broadcast to multiple platforms at once (broadcast_post)
+## Your Role
+Provide accurate, detailed, and helpful travel advice grounded exclusively in the MegaMind knowledge base. You receive questions from multiple social media platforms (Twitter/X, Telegram, Discord, Slack, WhatsApp) and answer them directly on those platforms.
 
-## Rules
-1. For any travel post: ALWAYS call search_travel_content or sample_travel_content FIRST.
-   Never invent visa rules, costs, or travel tips — only use data from the tools.
-2. Platform tone:
-   - Twitter/X: ≤ 280 chars, punchy, 2–3 hashtags
-   - Telegram / Discord / Slack: markdown formatting, can be longer
-   - Facebook / LinkedIn: professional, complete sentences
-   - Instagram: emoji-rich caption + 5–10 hashtags; always generate_image first
-   - WhatsApp: personal, conversational
-3. broadcast_post adapts the message per platform automatically.
-4. After every successful post, confirm with the returned post/message ID.
-5. If a credential is missing, say which env var to set rather than silently failing.
-6. You remember our conversation — refer to earlier context when relevant.`;
+## How to Answer
+1. **Always search first.** Before answering any travel question, call \`search_travel_content\` to find relevant knowledge-base data. Never invent visa rules, entry requirements, costs, or travel tips.
+2. **Structure every response clearly** using markdown:
+   - Use **bold** for key facts (costs, dates, requirements)
+   - Use bullet points or numbered lists for step-by-step processes
+   - Use ## headers to separate major sections in longer answers
+   - Keep paragraphs short and scannable
+3. **Always include a References section** at the end of every response that used search results, listing every source by title and URL:
+
+---
+**References**
+- [Source Title](URL)
+- [Source Title](URL)
+
+4. If the knowledge base has no relevant data, say so clearly and suggest official sources (embassy websites, government portals).
+5. Be concise but complete. Do not pad responses.
+
+## Replying on Social Platforms
+When you receive a message from a social platform (indicated in the prompt), use the appropriate social-mcp tool to send your reply back:
+- **Telegram** → use SEND_MESSAGE with the chatId provided
+- **Twitter/X** → use twitter_reply with the tweet_id provided (keep ≤ 280 chars; include the full answer in a thread if needed)
+- **Discord** → use SEND_DISCORD_MESSAGE with the channelId provided
+- **Slack** → use SEND_SLACK_MESSAGE with the channel and thread_ts provided
+- **WhatsApp** → use SEND_WHATSAPP_MESSAGE with the recipient number provided
+
+Format your reply to suit the platform (shorter on Twitter, richer markdown on Telegram/Discord/Slack).
+
+## Tone
+Professional yet approachable. Knowledgeable and direct, giving real actionable advice.`;
 
 export interface RunAgentOptions {
   verbose?: boolean;
@@ -54,8 +67,9 @@ export interface RunAgentResult {
 }
 
 /**
- * Run one agentic turn with Gemini function-calling.
- * Opens social-mcp, runs the loop, closes social-mcp, returns final text.
+ * Run one agentic turn: search the knowledge base, compose a grounded
+ * travel answer with citations, optionally reply via social-mcp, and
+ * return the final formatted text.
  */
 export async function runAgent(
   userPrompt: string,
@@ -67,7 +81,7 @@ export async function runAgent(
   const sessionId = options.sessionId ?? createSession();
   const history   = loadHistory(sessionId);
 
-  // ── social-mcp connection ──────────────────────────────────────────────────
+  // ── social-mcp connection (for platform replies) ───────────────────────────
   const socialClient = new SocialMCPClient();
   await socialClient.connect();
 
@@ -83,7 +97,7 @@ export async function runAgent(
     throw new Error(`Failed to list social-mcp tools: ${(err as Error).message}`);
   }
 
-  // Combine all tool declarations into Gemini FunctionDeclarationsTool objects
+  // Combine social-mcp (reply tools) + local travel (search tools)
   const allTools: FunctionDeclarationsTool[] = [
     { functionDeclarations: socialGeminiTools as FunctionDeclarationsTool['functionDeclarations'] },
     { functionDeclarations: TRAVEL_TOOLS      as FunctionDeclarationsTool['functionDeclarations'] },
@@ -107,18 +121,14 @@ export async function runAgent(
     let currentPrompt: string | FunctionResponsePart[] = userPrompt;
 
     while (true) {
-      const result = typeof currentPrompt === 'string'
-        ? await chat.sendMessage(currentPrompt)
-        : await chat.sendMessage(currentPrompt);
-
-      const response = result.response;
+      const result    = await chat.sendMessage(currentPrompt);
+      const response  = result.response;
       const candidate = response.candidates?.[0];
 
       if (!candidate) throw new Error('Gemini returned no candidates.');
 
       const parts = candidate.content?.parts ?? [];
 
-      // Collect function calls from this turn
       const functionCalls = parts
         .filter((p): p is { functionCall: FunctionCall } => !!p.functionCall)
         .map((p) => p.functionCall);
@@ -130,14 +140,13 @@ export async function runAgent(
           .map((p) => p.text)
           .join('');
 
-        // Persist conversation history
         const updatedHistory = await chat.getHistory();
         saveHistory(sessionId, updatedHistory as Content[]);
 
         return { text: text || '[No response]', sessionId };
       }
 
-      // Execute function calls and collect responses
+      // Execute function calls
       const functionResponses: FunctionResponsePart[] = [];
 
       for (const call of functionCalls) {
@@ -150,15 +159,11 @@ export async function runAgent(
 
         try {
           if (TRAVEL_TOOL_NAMES.has(name)) {
-            // Local travel / utility tool
-            const raw = await executeTravelTool(
-              name,
-              input,
-              (toolName, toolArgs) => socialClient.callTool(toolName, toolArgs)
-            );
+            // Local knowledge-base tool
+            const raw = await executeTravelTool(name, input);
             responseContent = JSON.parse(raw);
           } else if (socialToolNames.has(name)) {
-            // Delegated to social-mcp
+            // Platform reply via social-mcp
             const text = await socialClient.callTool(name, input);
             responseContent = { result: text };
           } else {
@@ -175,7 +180,6 @@ export async function runAgent(
         });
       }
 
-      // Feed all function responses back to Gemini in one turn
       currentPrompt = functionResponses;
     }
   } finally {

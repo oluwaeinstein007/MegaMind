@@ -1,70 +1,73 @@
 #!/usr/bin/env node
 /**
- * NomadSage — CLI entry point (v3)
+ * NomadSage Travel Advisor — CLI entry point
  *
  * Starts:
- *   • Interactive REPL (always)
- *   • Telegram bot     (polling, if TELEGRAM_BOT_TOKEN set)
- *   • Webhook server   (Slack/Discord/WhatsApp, if WEBHOOK_ENABLED=true)
- *   • Cron scheduler   (if SCHEDULER_ENABLED=true)
- *   • Twitter monitor  (if TWITTER_MONITOR_HANDLE set)
+ *   • Interactive REPL      (always)
+ *   • Telegram Q&A bot      (polling via Telegraf, if TELEGRAM_BOT_TOKEN set)
+ *   • Webhook server        (Telegram/Slack/Discord/WhatsApp inbound, if WEBHOOK_ENABLED=true)
+ *   • Twitter monitor       (if TWITTER_MONITOR_HANDLE set)
+ *
+ * All platform replies go through social-mcp — no custom platform clients are built here.
  *
  * Usage:
  *   pnpm dev                        # interactive REPL
- *   pnpm dev -- "Post about Bali"   # single-shot
+ *   pnpm dev -- "Do I need a visa?" # single-shot query
  *   pnpm dev -- --verbose "..."     # verbose tool tracing
- *   pnpm dev -- --trigger-now       # fire scheduler immediately and exit
  */
 
 import 'dotenv/config';
 import readline from 'readline';
-import { runAgent }           from './agent.js';
-import { printCredentialReport, hasMinimumCredentials } from './lib/credentials.js';
-import { createSession, listSessions, clearSession }    from './lib/memory.js';
+import { runAgent }                                       from './agent.js';
+import { printCredentialReport, hasMinimumCredentials }  from './lib/credentials.js';
+import { createSession, listSessions, clearSession }     from './lib/memory.js';
 import { getTravelContentCount }                         from './lib/megamind.js';
-import { startScheduler, stopScheduler, triggerNow }    from './lib/scheduler.js';
-import { startWebhookServer } from './lib/webhook.js';
+import { startWebhookServer }                            from './lib/webhook.js';
 import { startMonitoring, stopMonitoring }               from './lib/monitoring.js';
 import { TelegramBot }                                   from './lib/telegram-bot.js';
 
-// ── Banner ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function travelDbStatus(): string {
   try {
     const n = getTravelContentCount();
-    return n > 0 ? `${n} chunks` : 'empty (run NomadSage ingestor)';
+    return n > 0 ? `${n.toLocaleString()} chunks indexed` : 'empty — run the ingestor';
   } catch {
     return 'not found (set MEGAMIND_DB_PATH)';
   }
 }
 
 function printBanner(verbose: boolean): void {
-  const model = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  const model   = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  const db      = travelDbStatus();
+  const webhook = process.env.WEBHOOK_ENABLED === 'true' ? `port ${process.env.WEBHOOK_PORT ?? '3456'}` : 'disabled';
+  const twitter = process.env.TWITTER_MONITOR_HANDLE ?? 'not watching';
+
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
-║             NomadSage  v3.0  (Gemini + social-mcp)          ║
+║           NomadSage Travel Advisor  v1.0                     ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  AI Model  : ${model.padEnd(46)}║
-║  Travel DB : ${travelDbStatus().padEnd(46)}║
+║  Travel DB : ${db.padEnd(46)}║
+║  Webhook   : ${webhook.padEnd(46)}║
+║  Twitter   : ${twitter.padEnd(46)}║
 ╚══════════════════════════════════════════════════════════════╝
-${verbose ? '\n[verbose mode on — tool calls print to stderr]' : ''}
-Platforms : Twitter/X · Telegram · Discord · Slack
-            WhatsApp · Facebook · Instagram · LinkedIn
+${verbose ? '\n[verbose mode — tool calls print to stderr]' : ''}
+Receives travel questions from Telegram, Twitter/X, Discord, Slack,
+and WhatsApp. Replies via social-mcp on the originating platform.
 
-Special commands:
+Commands:
   /history          List recent conversation sessions
-  /session <id>     Switch to or resume a session
+  /session <id>     Switch to a previous session
   /clear            Clear current session memory
-  /trigger          Fire scheduled travel post now
   /creds            Show credential status
   /exit             Quit
 
-Example prompts:
-  Post a travel tip about Portugal on Twitter
-  Broadcast a Bali budget guide to twitter,telegram,discord
-  Generate an Instagram post about Japan cherry blossoms
-  Reply to tweet 1837291827456 with a helpful travel tip
-  Search travel content about "UK visa requirements"
+Example questions:
+  Do I need a visa to travel from Nigeria to Canada?
+  What are the cheapest destinations in Southeast Asia?
+  How long can I stay in the Schengen Area on a tourist visa?
+  Best time to visit Japan for cherry blossoms?
 `);
 }
 
@@ -97,27 +100,17 @@ async function handleCommand(
       console.log(`Session cleared. New session: ${state.sessionId}`);
       break;
     }
-    case '/trigger': {
-      console.log('[trigger] Firing scheduled travel post…');
-      try {
-        const result = await triggerNow((p) => runAgent(p, { verbose: state.verbose }).then((r) => r.text));
-        console.log(result);
-      } catch (err) {
-        console.error('[trigger] Error:', (err as Error).message);
-      }
-      break;
-    }
     case '/creds': {
       printCredentialReport();
       break;
     }
     case '/exit':
     case '/quit': {
-      console.log('Goodbye!');
+      console.log('Safe travels!');
       process.exit(0);
     }
     default:
-      return false; // not a command
+      return false;
   }
   return true;
 }
@@ -127,23 +120,18 @@ async function handleCommand(
 async function main(): Promise<void> {
   const args       = process.argv.slice(2);
   const verbose    = args.includes('--verbose');
-  const triggerNow_ = args.includes('--trigger-now');
   const promptArgs = args.filter((a) => !a.startsWith('--'));
 
-  // Credential check
   printCredentialReport();
   if (!hasMinimumCredentials()) {
     console.error('GEMINI_API_KEY is required. Set it in your .env file and restart.');
     process.exit(1);
   }
 
-  // Create a top-level agent runner bound to verbose flag (sessionId supported for per-chat context)
   const agentRunner = (prompt: string, sessionId?: string): Promise<string> =>
     runAgent(prompt, { verbose, sessionId }).then((r) => r.text);
 
-  // ── Optional background services ──────────────────────────────────────────
-
-  // Telegram polling bot (no public URL needed)
+  // ── Optional: Telegram Q&A bot (polling) ──────────────────────────────────
   let telegramBot: TelegramBot | null = null;
   if (process.env.TELEGRAM_BOT_TOKEN) {
     telegramBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, agentRunner);
@@ -152,37 +140,26 @@ async function main(): Promise<void> {
     });
   }
 
-  // Webhook server for Slack / Discord / WhatsApp
+  // ── Optional: Webhook server (receives inbound messages from platforms) ────
   if (process.env.WEBHOOK_ENABLED === 'true') {
     startWebhookServer(agentRunner);
   }
 
-  if (process.env.SCHEDULER_ENABLED === 'true') {
-    startScheduler(agentRunner);
-  }
-
+  // ── Optional: Twitter mention monitor ─────────────────────────────────────
   if (process.env.TWITTER_MONITOR_HANDLE) {
     startMonitoring(agentRunner);
   }
 
   // Graceful shutdown
-  process.on('SIGINT',  () => { telegramBot?.stop(); stopScheduler(); stopMonitoring(); console.log('\nGoodbye!'); process.exit(0); });
-  process.on('SIGTERM', () => { telegramBot?.stop(); stopScheduler(); stopMonitoring(); process.exit(0); });
-
-  // ── --trigger-now: fire once and exit ─────────────────────────────────────
-  if (triggerNow_) {
-    console.log('[trigger-now] Firing scheduled post…');
-    const result = await triggerNow(agentRunner);
-    console.log(result);
-    process.exit(0);
-  }
+  process.on('SIGINT',  () => { telegramBot?.stop(); stopMonitoring(); console.log('\nSafe travels!'); process.exit(0); });
+  process.on('SIGTERM', () => { telegramBot?.stop(); stopMonitoring(); process.exit(0); });
 
   // ── Single-shot mode ──────────────────────────────────────────────────────
   if (promptArgs.length > 0) {
     const prompt = promptArgs.join(' ');
     if (verbose) console.error(`[agent] prompt: ${prompt}\n`);
     const { text, sessionId } = await runAgent(prompt, { verbose });
-    console.log(text);
+    console.log('\n' + text);
     if (verbose) console.error(`[session] ${sessionId}`);
     process.exit(0);
   }
@@ -205,24 +182,23 @@ async function main(): Promise<void> {
     const input = line.trim();
     if (!input) { rl.prompt(); return; }
 
-    // Special commands
     if (input.startsWith('/')) {
       await handleCommand(input, state);
       rl.prompt();
       return;
     }
 
-    // Legacy "exit" / "quit"
     if (input === 'exit' || input === 'quit') {
-      console.log('Goodbye!');
+      console.log('Safe travels!');
       process.exit(0);
     }
 
     try {
-      console.log('\n[agent] Connecting to social-mcp and thinking…\n');
+      console.log('\n[thinking…]\n');
       const { text, sessionId } = await runAgent(input, { verbose, sessionId: state.sessionId });
       state.sessionId = sessionId;
       console.log(text);
+      console.log('\n' + '─'.repeat(64) + '\n');
     } catch (err) {
       console.error('\n[error]', (err as Error).message);
     }
@@ -230,7 +206,7 @@ async function main(): Promise<void> {
     rl.prompt();
   });
 
-  rl.on('close', () => { console.log('\nGoodbye!'); process.exit(0); });
+  rl.on('close', () => { console.log('\nSafe travels!'); process.exit(0); });
 }
 
 main().catch((err) => {

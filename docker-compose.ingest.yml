@@ -1,0 +1,18 @@
+services:
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile.ingest
+    # Pass your real secrets via .env
+    env_file: .env
+    volumes:
+      # SQLite DB persists here across runs
+      - megamind_data:/data
+    # Override CMD for one-off runs, e.g.:
+    #   docker compose -f docker-compose.ingest.yml run --rm ingest --category visa
+    command: ["--refresh", "--depth", "2", "--sitemap"]
+    # Never restart automatically — ingest is a one-shot job
+    restart: "no"
+
+volumes:
+  megamind_data:

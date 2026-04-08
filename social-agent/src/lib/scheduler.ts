@@ -1,9 +1,5 @@
 /**
- * Improvement #1 — Scheduler.
- *
- * Uses node-cron to fire a travel post at a configurable interval.
- * The agent is invoked with a "post travel topic" prompt and the result
- * is logged to the console (or can be wired to a callback).
+ * Cron scheduler — fires a travel post at a configurable interval.
  *
  * Config (env vars):
  *   SCHEDULER_CRON      cron expression (default: "0 9 * * *" = 9am daily)
@@ -17,10 +13,9 @@ export type AgentRunner = (prompt: string) => Promise<string>;
 
 let scheduledTask: cron.ScheduledTask | null = null;
 
-const DEFAULT_CRON      = '0 9 * * *';   // 9am every day
+const DEFAULT_CRON      = '0 9 * * *';
 const DEFAULT_PLATFORMS = 'twitter';
 
-/** Build the prompt sent to the agent on each scheduled tick. */
 function buildScheduledPrompt(): string {
   const platforms = (process.env.SCHEDULER_PLATFORMS ?? DEFAULT_PLATFORMS)
     .split(',')
@@ -29,17 +24,12 @@ function buildScheduledPrompt(): string {
     .join(' and ');
 
   return (
-    `Sample a random piece of travel content from NomadSage, ` +
-    `write an engaging post based on it, and publish it to ${platforms}. ` +
+    `Sample a random piece of travel content from the knowledge base, ` +
+    `write an engaging, platform-native post based on it, and publish it to ${platforms}. ` +
     `Use platform-appropriate tone and formatting.`
   );
 }
 
-/**
- * Start the scheduler.
- * @param runAgent  The agent runner function to call on each tick.
- * @param cronExpr  Override the SCHEDULER_CRON env var.
- */
 export function startScheduler(runAgent: AgentRunner, cronExpr?: string): void {
   const expr = cronExpr ?? process.env.SCHEDULER_CRON ?? DEFAULT_CRON;
 
@@ -51,7 +41,6 @@ export function startScheduler(runAgent: AgentRunner, cronExpr?: string): void {
   scheduledTask = cron.schedule(expr, async () => {
     const prompt = buildScheduledPrompt();
     console.log(`\n[scheduler] ${new Date().toISOString()} — firing travel post`);
-    console.log(`[scheduler] prompt: ${prompt}`);
     try {
       const result = await runAgent(prompt);
       console.log('[scheduler] result:', result);
@@ -63,7 +52,6 @@ export function startScheduler(runAgent: AgentRunner, cronExpr?: string): void {
   console.log(`[scheduler] Started — cron: "${expr}" | platforms: ${process.env.SCHEDULER_PLATFORMS ?? DEFAULT_PLATFORMS}`);
 }
 
-/** Stop the scheduler if running. */
 export function stopScheduler(): void {
   if (scheduledTask) {
     scheduledTask.stop();
@@ -72,7 +60,6 @@ export function stopScheduler(): void {
   }
 }
 
-/** Manually trigger one scheduled post immediately (useful for testing). */
 export async function triggerNow(runAgent: AgentRunner): Promise<string> {
   const prompt = buildScheduledPrompt();
   console.log(`[scheduler] Manual trigger — prompt: ${prompt}`);

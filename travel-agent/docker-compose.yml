@@ -1,0 +1,17 @@
+services:
+  travel-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nomadsage-travel-agent:latest
+    container_name: nomadsage-travel-agent
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    env_file: .env
+    volumes:
+      - ${MEGAMIND_DIST_PATH:-../dist}:/data:ro   # MegaMind SQLite DB (read-only)
+      - travel-agent-memory:/app/memory            # persistent session memory
+
+volumes:
+  travel-agent-memory:

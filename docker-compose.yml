@@ -1,0 +1,60 @@
+# NomadSage — full stack
+#
+# Services:
+#   travel-agent   AI travel advisor — answers questions on all social platforms via social-mcp
+#   social-agent   Social media manager — creates & publishes travel content
+#
+# Both services share the same read-only SQLite DB (megamind_data volume).
+# Build context is the repository root so the pnpm workspace lockfile is accessible.
+#
+# Prerequisites:
+#   Run the ingestor once to populate the SQLite DB:
+#     docker compose -f docker-compose.ingest.yml run --rm ingest
+#
+# Usage:
+#   docker compose up -d                  # start both agents
+#   docker compose up travel-agent        # travel advisor only
+#   docker compose up social-agent        # social media manager only
+#   docker compose logs -f travel-agent   # tail travel advisor logs
+#   docker compose logs -f social-agent   # tail social manager logs
+
+services:
+
+  # ── Travel Advisor ─────────────────────────────────────────────────────────
+  travel-agent:
+    build:
+      context: .
+      dockerfile: travel-agent/Dockerfile
+    image: nomadsage-travel-agent:latest
+    container_name: nomadsage-travel-agent
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    env_file: ./travel-agent/.env
+    ports:
+      - "${TRAVEL_WEBHOOK_PORT:-3456}:3456"
+    volumes:
+      - megamind_data:/data:ro
+      - travel-agent-memory:/app/memory
+
+  # ── Social Media Manager ───────────────────────────────────────────────────
+  social-agent:
+    build:
+      context: .
+      dockerfile: social-agent/Dockerfile
+    image: nomadsage-social-agent:latest
+    container_name: nomadsage-social-agent
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    env_file: ./social-agent/.env
+    ports:
+      - "${SOCIAL_WEBHOOK_PORT:-3457}:3456"
+    volumes:
+      - megamind_data:/data:ro
+      - social-agent-memory:/app/memory
+
+volumes:
+  megamind_data:
+  travel-agent-memory:
+  social-agent-memory:

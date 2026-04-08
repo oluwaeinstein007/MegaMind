@@ -1,2 +1,6 @@
+packages:
+  - travel-agent
+  - social-agent
+
 onlyBuiltDependencies:
   - better-sqlite3

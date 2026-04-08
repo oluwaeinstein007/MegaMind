@@ -1,15 +1,15 @@
 /**
- * Travel + cross-cutting tools — Gemini FunctionDeclarations.
+ * JournVibe Social Media Manager — tool declarations for Gemini.
  *
  * Covers:
- *   • search_travel_content   (#3 Qdrant-backed semantic search)
- *   • sample_travel_content   (random inspiration)
- *   • generate_image          (#4 image generation for Instagram)
- *   • broadcast_post          (#5 multi-platform broadcast)
- *   • linkedin_post           (#6 LinkedIn)
+ *   • search_travel_content   — knowledge-base semantic search (for post inspiration)
+ *   • sample_travel_content   — random inspiration
+ *   • generate_image          — image generation for Instagram
+ *   • broadcast_post          — multi-platform broadcast
+ *   • linkedin_post           — LinkedIn direct post
+ *   • telegram_reply          — reply to a specific Telegram message
  */
 
-// Define locally so this file has no peer-dep on @google/generative-ai at import time
 export interface FunctionDeclaration {
   name: string;
   description?: string;
@@ -20,14 +20,14 @@ import { searchTravelContent, sampleTravelContent, getTravelContentCount } from 
 import { generateImage } from '../lib/image-gen.js';
 import { linkedInPost } from '../lib/linkedin.js';
 
-// ── Tool declarations (passed to Gemini) ──────────────────────────────────────
+// ── Tool declarations ─────────────────────────────────────────────────────────
 
-export const TRAVEL_TOOLS: FunctionDeclaration[] = [
+export const SOCIAL_TOOLS: FunctionDeclaration[] = [
   {
     name: 'search_travel_content',
     description:
-      "Search NomadSage's travel knowledge base for relevant content chunks. " +
-      'Always call this before composing a travel post — it grounds content in ' +
+      "Search NomadSage's travel knowledge base for content to base posts on. " +
+      'Always call this before composing a travel post — grounds content in ' +
       'real visa requirements, destination guides, budgets, and tips. ' +
       'Uses Qdrant semantic search when available, SQLite keyword search as fallback.',
     parameters: {
@@ -94,17 +94,17 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
         platforms: {
           type: 'string',
           description:
-            'Comma-separated list of platforms to post to. ' +
-            'Valid values: twitter, telegram, discord, slack, whatsapp, facebook, linkedin. ' +
+            'Comma-separated list of platforms. ' +
+            'Valid: twitter, telegram, discord, slack, whatsapp, facebook, linkedin. ' +
             'Example: "twitter,telegram,discord"',
         },
         twitter_text: {
           type: 'string',
-          description: 'Optional Twitter-specific text override (max 280 chars). Uses message if omitted.',
+          description: 'Optional Twitter-specific text override (max 280 chars).',
         },
         image_url: {
           type: 'string',
-          description: 'Optional public image URL — required if instagram is in the platforms list.',
+          description: 'Public image URL — required if instagram is in the platforms list.',
         },
       },
       required: ['message', 'platforms'],
@@ -127,15 +127,14 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
   {
     name: 'telegram_reply',
     description:
-      'Send a reply to a specific Telegram message. Use this when you receive an incoming ' +
-      'Telegram message and want to reply directly to it (quoted reply). ' +
-      'If message_id is omitted the message is sent without quoting.',
+      'Send a reply to a specific Telegram message. Use when you receive an incoming ' +
+      'Telegram message and want to reply directly to it (quoted reply).',
     parameters: {
       type: 'object',
       properties: {
         chat_id: {
           type: 'string',
-          description: 'The Telegram chat ID or @username of the chat.',
+          description: 'The Telegram chat ID or @username.',
         },
         text: {
           type: 'string',
@@ -143,7 +142,7 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
         },
         message_id: {
           type: 'number',
-          description: 'The ID of the message to reply to (for quoted replies). Optional.',
+          description: 'ID of the message to reply to (for quoted replies). Optional.',
         },
       },
       required: ['chat_id', 'text'],
@@ -153,17 +152,11 @@ export const TRAVEL_TOOLS: FunctionDeclaration[] = [
 
 // ── Names set for routing ─────────────────────────────────────────────────────
 
-export const TRAVEL_TOOL_NAMES = new Set(TRAVEL_TOOLS.map((t) => t.name));
+export const SOCIAL_TOOL_NAMES = new Set(SOCIAL_TOOLS.map((t) => t.name));
 
 // ── Executor ──────────────────────────────────────────────────────────────────
 
-/**
- * Execute a local travel/utility tool and return a JSON string result.
- *
- * broadcast_post needs access to the social-mcp callTool function, so we
- * accept it as a dependency parameter.
- */
-export async function executeTravelTool(
+export async function executeSocialTool(
   name: string,
   input: Record<string, unknown>,
   callSocialTool: (name: string, args: Record<string, unknown>) => Promise<string>
@@ -183,12 +176,11 @@ export async function executeTravelTool(
         return JSON.stringify({
           results: [],
           note: count === 0
-            ? 'NomadSage database is empty — run the NomadSage ingestor first.'
+            ? 'Knowledge base is empty — run the MegaMind ingestor first.'
             : `No matches for "${query}". Try broader keywords.`,
         });
       }
 
-      // score is present on Qdrant results; cast to access the optional field safely
       type WithScore = (typeof results)[number] & { score?: number };
       const hasScore = (r: unknown): r is WithScore => typeof (r as WithScore).score === 'number';
       const firstScore = hasScore(results[0]) ? results[0].score : undefined;
@@ -213,7 +205,7 @@ export async function executeTravelTool(
       const results = sampleTravelContent(limit);
 
       if (results.length === 0) {
-        return JSON.stringify({ results: [], note: 'NomadSage database is empty — run the ingestor first.' });
+        return JSON.stringify({ results: [], note: 'Knowledge base is empty — run the ingestor first.' });
       }
 
       return JSON.stringify({
@@ -245,7 +237,7 @@ export async function executeTravelTool(
       const twitterText = input.twitter_text ? String(input.twitter_text).slice(0, 280) : message.slice(0, 280);
       const imageUrl   = input.image_url ? String(input.image_url) : undefined;
 
-      if (!message)    return JSON.stringify({ error: 'message is required' });
+      if (!message)         return JSON.stringify({ error: 'message is required' });
       if (!platforms.length) return JSON.stringify({ error: 'platforms is required' });
 
       const results: Record<string, string> = {};
@@ -288,9 +280,7 @@ export async function executeTravelTool(
               const userId = process.env.INSTAGRAM_ACCOUNT_ID;
               if (!userId)   { results.instagram = 'skipped — INSTAGRAM_ACCOUNT_ID not set'; break; }
               if (!imageUrl) { results.instagram = 'skipped — image_url required for Instagram'; break; }
-              results.instagram = await callSocialTool('CREATE_INSTAGRAM_POST', {
-                userId, imageUrl, message,
-              });
+              results.instagram = await callSocialTool('CREATE_INSTAGRAM_POST', { userId, imageUrl, message });
               break;
             }
 
@@ -355,14 +345,10 @@ export async function executeTravelTool(
       if (!data.ok) return JSON.stringify({ error: data.description ?? 'Telegram API error' });
 
       const msg = data.result as Record<string, unknown>;
-      return JSON.stringify({
-        success: true,
-        message_id: msg.message_id,
-        chat_id: chatId,
-      });
+      return JSON.stringify({ success: true, message_id: msg.message_id, chat_id: chatId });
     }
 
     default:
-      return JSON.stringify({ error: `Unknown travel tool: ${name}` });
+      return JSON.stringify({ error: `Unknown social tool: ${name}` });
   }
 }

@@ -1,10 +1,10 @@
 services:
-  agent:
+  social-agent:
     build:
       context: .
       dockerfile: Dockerfile
-    image: megamind-agent:latest
-    container_name: megamind-agent
+    image: nomadsage-social-agent:latest
+    container_name: nomadsage-social-agent
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -13,7 +13,7 @@ services:
       - "${WEBHOOK_PORT:-3456}:3456"
     volumes:
       - ${MEGAMIND_DIST_PATH:-../dist}:/data:ro   # MegaMind SQLite DB (read-only)
-      - agent-memory:/app/memory  # persistent session memory
+      - social-agent-memory:/app/memory            # persistent session memory
 
 volumes:
-  agent-memory:
+  social-agent-memory:

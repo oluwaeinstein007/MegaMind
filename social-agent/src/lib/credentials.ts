@@ -1,9 +1,5 @@
 /**
- * Improvement #9 — Credential validation on startup.
- *
- * Checks every platform's required env vars and reports which are
- * configured, which are missing, and which are fully ready.
- * Does NOT throw; callers decide whether to abort or warn.
+ * Social Media Manager — credential validation on startup.
  */
 
 export interface PlatformStatus {
@@ -25,24 +21,19 @@ function buildPlatformVars(): Record<string, string[]> {
     LinkedIn:  ['LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_USER_ID'],
     Qdrant:    ['QDRANT_HOST', 'QDRANT_KEY'],
   };
-  // OpenAI is only required when using openai as the embedding provider
   if ((process.env.EMBEDDING_PROVIDER ?? 'openai').toLowerCase() === 'openai') {
     vars['OpenAI'] = ['OPENAI_API_KEY'];
   }
   return vars;
 }
 
-const PLATFORM_VARS = buildPlatformVars();
-
-/** Check all platform credentials and return per-platform status. */
 export function validateCredentials(): PlatformStatus[] {
-  return Object.entries(PLATFORM_VARS).map(([platform, vars]) => {
+  return Object.entries(buildPlatformVars()).map(([platform, vars]) => {
     const missing = vars.filter((v) => !process.env[v]);
     return { platform, ready: missing.length === 0, missing };
   });
 }
 
-/** Print a startup credential report to the console. */
 export function printCredentialReport(): void {
   const statuses = validateCredentials();
   console.log('\n┌─ Credential Status ───────────────────────────────────┐');
@@ -56,14 +47,12 @@ export function printCredentialReport(): void {
   console.log('└───────────────────────────────────────────────────────┘\n');
 }
 
-/** Return true only if the minimum required credential (Gemini) is present. */
 export function hasMinimumCredentials(): boolean {
   return !!process.env.GEMINI_API_KEY;
 }
 
-/** Return the list of platforms that are fully configured. */
 export function readyPlatforms(): string[] {
   return validateCredentials()
-    .filter((s) => s.ready && s.platform !== 'Gemini' && s.platform !== 'Qdrant' && s.platform !== 'OpenAI')
+    .filter((s) => s.ready && !['Gemini', 'Qdrant', 'OpenAI'].includes(s.platform))
     .map((s) => s.platform);
 }

@@ -1,29 +1,26 @@
 /**
- * NomadSage Telegram Bot — polling-based (Telegraf)
+ * NomadSage Social — Telegram Bot (polling-based, Telegraf)
  *
- * Uses Telegraf's built-in long-polling (getUpdates) so no public URL,
- * no webhook registration, and no ngrok are needed for local or prod.
+ * Acts as a command interface for the social media agent.
+ * Users can request posts, broadcasts, and content creation via chat.
  *
  * Behaviour:
  *   • Private chats  — responds to every message
  *   • Groups         — only responds when @mentioned or replied to
- *   • Sessions       — one per chat (groups) or per user (DMs), keyed by
- *                      deterministic IDs backed by NomadSage's SQLite memory
- *   • Session expiry — conversation history is cleared after 30 min of inactivity
+ *   • Session expiry — conversation history cleared after 30 min of inactivity
  */
 
 import { Telegraf } from 'telegraf';
 import { clearSession } from './memory.js';
 import type { AgentRunner } from './webhook.js';
 
-const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TTL_MS = 30 * 60 * 1000;
 
 type ChatType = 'private' | 'group' | 'supergroup' | 'channel';
 
 export class TelegramBot {
   private bot: Telegraf;
   private runner: AgentRunner;
-  /** sessionId → inactivity timer */
   private timers = new Map<string, NodeJS.Timeout>();
 
   constructor(token: string, runner: AgentRunner) {
@@ -32,20 +29,15 @@ export class TelegramBot {
     this.setupHandlers();
   }
 
-  // ── Session helpers ───────────────────────────────────────────────────────
-
-  /** Deterministic session ID — groups share one, DMs are per-user. */
   private sessionId(chatType: ChatType, chatId: number, userId: number): string {
     return chatType === 'group' || chatType === 'supergroup'
       ? `telegram-group-${chatId}`
       : `telegram-dm-${userId}`;
   }
 
-  /** Reset the 30-min inactivity timer for a session. */
   private touch(sessionId: string): void {
     const existing = this.timers.get(sessionId);
     if (existing) clearTimeout(existing);
-
     this.timers.set(
       sessionId,
       setTimeout(() => {
@@ -62,23 +54,11 @@ export class TelegramBot {
     if (t) { clearTimeout(t); this.timers.delete(sessionId); }
   }
 
-  // ── Message helpers ───────────────────────────────────────────────────────
-
   private stripMention(text: string, botUsername: string): string {
     return text.replace(new RegExp(`@${botUsername}`, 'gi'), '').trim();
   }
 
-  /**
-   * Groups: only respond when @mentioned OR when user replies to bot's message.
-   * Private chats: always respond.
-   */
-  private shouldRespond(
-    chatType: ChatType,
-    text: string,
-    botUsername: string,
-    replyToUserId: number | undefined,
-    botId: number,
-  ): boolean {
+  private shouldRespond(chatType: ChatType, text: string, botUsername: string, replyToUserId: number | undefined, botId: number): boolean {
     if (chatType === 'private') return true;
     return (
       text.toLowerCase().includes(`@${botUsername.toLowerCase()}`) ||
@@ -86,21 +66,15 @@ export class TelegramBot {
     );
   }
 
-  // ── Intro text ────────────────────────────────────────────────────────────
-
   private groupIntro(mention: string): string {
     return (
-      `I'm NomadSage — your AI travel content & social media agent.\n` +
-      `Tag me (${mention}) or reply to my messages to chat!\n\n` +
+      `I'm NomadSage Social — your AI travel content & social media manager.\n` +
+      `Tag me (${mention}) or reply to my messages to post!\n\n` +
       `I can post on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, Instagram & LinkedIn.`
     );
   }
 
-  // ── Handler setup ─────────────────────────────────────────────────────────
-
   private setupHandlers(): void {
-
-    // Auto-greet when added to a group
     this.bot.on('new_chat_members', (ctx) => {
       const botId = ctx.botInfo?.id;
       const added = ctx.message.new_chat_members.some((m) => m.id === botId);
@@ -109,7 +83,6 @@ export class TelegramBot {
       ctx.reply(this.groupIntro(mention));
     });
 
-    // /start
     this.bot.start((ctx) => {
       const name    = ctx.from?.first_name ?? 'there';
       const isGroup = ctx.chat?.type !== 'private';
@@ -119,83 +92,70 @@ export class TelegramBot {
         ctx.reply(this.groupIntro(mention));
       } else {
         ctx.reply(
-          `Hello ${name}! I'm NomadSage, your AI travel content & social media agent.\n\n` +
-          `I can help you:\n` +
-          `  Post & reply on Twitter/X\n` +
-          `  Send messages on Telegram, Discord, Slack, WhatsApp\n` +
-          `  Create posts on Facebook, Instagram & LinkedIn\n` +
-          `  Search & create travel content from the NomadSage knowledge base\n\n` +
-          `Just send me a message. Use /clear to reset our conversation.`,
+          `Hello ${name}! I'm NomadSage Social, your travel content & social media agent.\n\n` +
+          `Tell me what to post and where:\n` +
+          `  "Post a travel tip about Bali on Twitter"\n` +
+          `  "Broadcast a Lisbon guide to twitter, telegram and discord"\n` +
+          `  "Generate an Instagram post about Japan cherry blossoms"\n\n` +
+          `Use /clear to reset our conversation.`,
         );
       }
     });
 
-    // /clear
     this.bot.command('clear', (ctx) => {
       const chatType = ctx.chat?.type as ChatType;
       const chatId   = ctx.chat?.id;
       const userId   = ctx.from?.id;
       if (!chatId || !userId) return;
-
       const sid = this.sessionId(chatType, chatId, userId);
       this.resetSession(sid);
-
-      const scope = chatType === 'group' || chatType === 'supergroup'
-        ? 'Group conversation'
-        : 'Conversation';
-      ctx.reply(`${scope} cleared! Start fresh with your next message.`);
+      ctx.reply('Conversation cleared! Ready for new instructions.');
     });
 
-    // /help
     this.bot.command('help', (ctx) => {
       const isGroup = ctx.chat?.type !== 'private';
       const mention = ctx.botInfo?.username ? `@${ctx.botInfo.username}` : 'me';
       ctx.reply(
+        `*NomadSage Social Media Manager*\n\n` +
         `*Commands:*\n` +
         `/clear — Reset conversation history\n` +
         `/help  — Show this help\n\n` +
         (isGroup ? `*Usage:* Tag ${mention} or reply to my messages.\n\n` : '') +
-        `*Examples:*\n` +
-        `• Post a travel tip about Bali on Twitter\n` +
-        `• Broadcast a Lisbon guide to telegram and discord\n` +
+        `*Example prompts:*\n` +
+        `• Post a travel tip about Portugal on Twitter\n` +
+        `• Broadcast a Bali budget guide to twitter,telegram,discord\n` +
         `• Generate an Instagram post about Japan cherry blossoms\n` +
         `• Search travel content about UK visa requirements`,
         { parse_mode: 'Markdown' },
       );
     });
 
-    // Main message handler
     this.bot.on('text', async (ctx) => {
       const chatType = ctx.chat?.type as ChatType;
       const chatId   = ctx.chat?.id;
       const userId   = ctx.from?.id;
       if (!chatId || !userId) return;
 
-      const botUsername    = ctx.botInfo?.username ?? '';
-      const botId          = ctx.botInfo?.id ?? 0;
-      const rawText        = ctx.message.text;
-      const replyToUserId  = ctx.message.reply_to_message?.from?.id;
+      const botUsername   = ctx.botInfo?.username ?? '';
+      const botId         = ctx.botInfo?.id ?? 0;
+      const rawText       = ctx.message.text;
+      const replyToUserId = ctx.message.reply_to_message?.from?.id;
 
-      // Group: only reply when @mentioned or user replied to the bot
       if (!this.shouldRespond(chatType, rawText, botUsername, replyToUserId, botId)) return;
 
       const userMessage = this.stripMention(rawText, botUsername);
       if (!userMessage) return;
 
-      // Prefix with sender name in groups so the agent has context
-      const isGroup      = chatType === 'group' || chatType === 'supergroup';
-      const senderName   = ctx.from?.first_name ?? 'User';
-      const agentPrompt  = isGroup ? `[${senderName}]: ${userMessage}` : userMessage;
+      const isGroup     = chatType === 'group' || chatType === 'supergroup';
+      const senderName  = ctx.from?.first_name ?? 'User';
+      const agentPrompt = isGroup ? `[${senderName}]: ${userMessage}` : userMessage;
 
       const sid = this.sessionId(chatType, chatId, userId);
-      this.touch(sid); // reset inactivity timer
+      this.touch(sid);
 
       try {
         await ctx.sendChatAction('typing');
-
         const reply = await this.runner(agentPrompt, sid);
-
-        // Try Markdown first, fall back to plain text
         try {
           await ctx.reply(reply, { parse_mode: 'Markdown' });
         } catch {
@@ -209,20 +169,15 @@ export class TelegramBot {
     });
   }
 
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
-
   async start(): Promise<void> {
     console.log('[telegram-bot] Starting (polling mode)…');
-    // dropPendingUpdates: discard messages that arrived while offline
     await this.bot.launch({ dropPendingUpdates: true });
     const username = this.bot.botInfo?.username;
     console.log(`[telegram-bot] @${username ?? 'bot'} is live`);
-    console.log(`[telegram-bot] DMs: always responds | Groups: @mention or reply to bot`);
   }
 
   stop(): void {
     this.bot.stop('SIGINT');
-    // Clear all pending session expiry timers
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
   }

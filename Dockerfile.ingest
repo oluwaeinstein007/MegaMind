@@ -1,0 +1,62 @@
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+# Use the official Playwright image — it already has Chromium + all system deps
+FROM mcr.microsoft.com/playwright:v1.56.0-jammy AS builder
+
+# Install pnpm + build tools for native modules (better-sqlite3)
+RUN npm install -g pnpm && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy manifests first for better layer caching
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile
+
+# Copy source
+COPY tsconfig.json ./
+COPY src/ ./src/
+COPY run_ingest_dataset.ts ./
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/playwright:v1.56.0-jammy AS runtime
+
+RUN npm install -g pnpm
+
+WORKDIR /app
+
+# Copy installed deps and source from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/run_ingest_dataset.ts ./
+COPY package.json tsconfig.json ./
+
+# ── Persistent storage ────────────────────────────────────────────────────────
+# Mount a volume so the SQLite DB survives container restarts:
+#   docker run -v megamind_data:/data ...
+VOLUME ["/data"]
+
+# ── Environment defaults ──────────────────────────────────────────────────────
+# Override all of these at runtime via --env-file .env or -e flags
+
+# Embedding
+ENV EMBEDDING_PROVIDER=gemini
+ENV GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+ENV EMBEDDING_VECTOR_SIZE=3072
+ENV EMBEDDING_BATCH_SIZE=100
+ENV EMBEDDING_INTER_BATCH_DELAY_MS=200
+
+# Qdrant
+ENV QDRANT_ENABLED=true
+ENV QDRANT_COLLECTION_NAME=megamind
+
+# Playwright runs headless inside the container
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+# Default: full dataset refresh at depth 2 with sitemap
+# Override CMD to change behaviour:
+#   docker run ... ingest --category visa --depth 3
+ENTRYPOINT ["pnpm", "tsx", "run_ingest_dataset.ts"]
+CMD ["--refresh", "--depth", "2", "--sitemap"]

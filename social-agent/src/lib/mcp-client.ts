@@ -1,7 +1,5 @@
 /**
- * SocialMCPClient — v3
- *
- * Improvement #8: Rate-limit handling with exponential backoff.
+ * SocialMCPClient — wraps the social-mcp package via stdio.
  *
  * All tool calls are wrapped in a retry loop that detects 429 / rate-limit
  * errors from social-mcp and backs off before retrying.
@@ -11,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { FunctionDeclaration } from '../tools/travel.js';
+import type { FunctionDeclaration } from '../tools/social.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,7 +23,7 @@ type ToolCallContent = { type: string; text?: string };
 
 // ── Retry config ──────────────────────────────────────────────────────────────
 
-const MAX_RETRIES  = 3;
+const MAX_RETRIES   = 3;
 const BASE_DELAY_MS = 1_500;
 
 function isRateLimitError(message: string): boolean {
@@ -44,14 +42,12 @@ async function sleep(ms: number) {
 }
 
 // ── Schema sanitiser: JSON Schema → Gemini-compatible ─────────────────────────
-// Gemini doesn't support anyOf, oneOf, minLength, maxLength, etc.
 
 function sanitiseSchema(schema: Record<string, unknown>): Record<string, unknown> {
   if (!schema || typeof schema !== 'object') return schema;
 
   const out: Record<string, unknown> = {};
 
-  // Flatten anyOf by picking the first concrete type
   if (Array.isArray(schema.anyOf)) {
     const first = (schema.anyOf as Record<string, unknown>[])[0];
     if (first?.type) out.type = first.type;
@@ -59,7 +55,6 @@ function sanitiseSchema(schema: Record<string, unknown>): Record<string, unknown
     return out;
   }
 
-  // Copy only fields Gemini understands
   const allowed = ['type', 'description', 'enum', 'format', 'nullable', 'properties', 'required', 'items'];
   for (const key of allowed) {
     if (key in schema) out[key] = schema[key];
@@ -84,7 +79,6 @@ function sanitiseSchema(schema: Record<string, unknown>): Record<string, unknown
 
 export function mcpToolToGemini(tool: MCPTool): FunctionDeclaration {
   const schema = sanitiseSchema(tool.inputSchema);
-  // Ensure top-level type is 'object' for Gemini
   if (!schema.type) schema.type = 'object';
   return {
     name: tool.name,
@@ -113,14 +107,13 @@ export class SocialMCPClient {
     });
 
     this.client = new Client(
-      { name: 'megamind-social-agent', version: '3.0.0' },
+      { name: 'nomadsage-social-agent', version: '1.0.0' },
       { capabilities: {} }
     );
 
     await this.client.connect(this.transport);
   }
 
-  /** Return all social-mcp tools as Gemini FunctionDeclarations. */
   async listToolsAsGemini(): Promise<FunctionDeclaration[]> {
     const { tools } = await this.client.listTools();
     return (tools as MCPTool[]).map(mcpToolToGemini);
@@ -131,10 +124,7 @@ export class SocialMCPClient {
     return tools as MCPTool[];
   }
 
-  /**
-   * Call a social-mcp tool with exponential-backoff retry on rate-limit errors.
-   * Returns concatenated text from the tool's content blocks.
-   */
+  /** Call a tool with exponential-backoff retry on rate-limit errors. */
   async callTool(name: string, toolInput: Record<string, unknown>): Promise<string> {
     let attempt = 0;
 
