@@ -32,7 +32,7 @@ services:
     tty: true
     env_file: ./travel-agent/.env
     ports:
-      - "${TRAVEL_WEBHOOK_PORT:-3456}:3456"
+      - "${TRAVEL_WEBHOOK_PORT:-3458}:3456"
     volumes:
       - megamind_data:/data:ro
       - travel-agent-memory:/app/memory
