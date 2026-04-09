@@ -5,7 +5,7 @@
 FROM node:22-alpine AS builder
 
 RUN apk upgrade --no-cache && apk add --no-cache python3 make g++ \
- && corepack enable && corepack prepare pnpm@latest --activate
+    && corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
@@ -15,26 +15,28 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Copy the agent package manifest so pnpm resolves its deps
 COPY social-agent/package.json ./social-agent/
 
-# Install only social-agent's dependencies (hoisted to workspace root)
-RUN pnpm install --frozen-lockfile --filter nomadsage-social-agent
+# Install only social-agent's dependencies into its package folder
+RUN pnpm --dir social-agent install --frozen-lockfile --workspace-root=false
 
 # Copy source and build
 COPY social-agent/tsconfig.json ./social-agent/
 COPY social-agent/src/ ./social-agent/src/
-RUN pnpm --filter nomadsage-social-agent build
+RUN pnpm --dir social-agent build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
 
 RUN apk upgrade --no-cache \
- && corepack enable && corepack prepare pnpm@latest --activate
+    && corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-# pnpm hoists all deps to the workspace root node_modules
-COPY --from=builder /app/node_modules ./node_modules/
-COPY --from=builder /app/social-agent/dist ./dist/
-COPY social-agent/package.json ./
+COPY --from=builder /app/node_modules/.pnpm ./node_modules/.pnpm
+COPY --from=builder /app/social-agent/node_modules ./social-agent/node_modules
+COPY --from=builder /app/social-agent/dist ./social-agent/dist
+COPY social-agent/package.json ./social-agent/
+
+WORKDIR /app/social-agent
 
 # Mount MegaMind SQLite DB at /data/ingestor.db
 VOLUME ["/data"]

@@ -5,7 +5,7 @@
 FROM node:22-alpine AS builder
 
 RUN apk upgrade --no-cache && apk add --no-cache python3 make g++ \
- && corepack enable && corepack prepare pnpm@10.7.1 --activate
+    && corepack enable && corepack prepare pnpm@10.7.1 --activate
 
 WORKDIR /app
 
@@ -15,26 +15,28 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Copy the agent package manifest so pnpm resolves its deps
 COPY travel-agent/package.json ./travel-agent/
 
-# Install only travel-agent's dependencies (hoisted to workspace root)
-RUN pnpm install --frozen-lockfile --filter nomadsage-travel-agent
+# Install only travel-agent's dependencies into its package folder
+RUN pnpm --dir travel-agent install --frozen-lockfile --workspace-root=false
 
 # Copy source and build
 COPY travel-agent/tsconfig.json ./travel-agent/
 COPY travel-agent/src/ ./travel-agent/src/
-RUN pnpm --filter nomadsage-travel-agent build
+RUN pnpm --dir travel-agent build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
 
 RUN apk upgrade --no-cache \
- && corepack enable && corepack prepare pnpm@10.7.1 --activate
+    && corepack enable && corepack prepare pnpm@10.7.1 --activate
 
 WORKDIR /app
 
-# pnpm hoists all deps to the workspace root node_modules
-COPY --from=builder /app/node_modules ./node_modules/
-COPY --from=builder /app/travel-agent/dist ./dist/
-COPY travel-agent/package.json ./
+COPY --from=builder /app/node_modules/.pnpm ./node_modules/.pnpm
+COPY --from=builder /app/travel-agent/node_modules ./travel-agent/node_modules
+COPY --from=builder /app/travel-agent/dist ./travel-agent/dist
+COPY travel-agent/package.json ./travel-agent/
+
+WORKDIR /app/travel-agent
 
 # Mount MegaMind SQLite DB at /data/ingestor.db
 VOLUME ["/data"]
