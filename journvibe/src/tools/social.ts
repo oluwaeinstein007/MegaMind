@@ -148,6 +148,34 @@ export const SOCIAL_TOOLS: FunctionDeclaration[] = [
       required: ['chat_id', 'text'],
     },
   },
+  {
+    name: 'schedule_message',
+    description:
+      'Schedule a Telegram message to be sent to a specific chat at a future time. ' +
+      'Use this when a user asks to be reminded, notified, or messaged at a specific time. ' +
+      'The message will be sent automatically even after this conversation ends. ' +
+      'Always confirm the scheduled time back to the user.',
+    parameters: {
+      type: 'object',
+      properties: {
+        chat_id: {
+          type: 'string',
+          description: 'The Telegram chat ID to send the message to. Extract from the [chat_id: ...] prefix in the user prompt.',
+        },
+        text: {
+          type: 'string',
+          description: 'The message to send at the scheduled time.',
+        },
+        time: {
+          type: 'string',
+          description:
+            'The time to send the message. Accepts "1:40 AM", "1:45 PM", "13:45", "01:40" formats. ' +
+            'If the time has already passed today, it schedules for tomorrow.',
+        },
+      },
+      required: ['chat_id', 'text', 'time'],
+    },
+  },
 ];
 
 // ── Names set for routing ─────────────────────────────────────────────────────
@@ -348,7 +376,101 @@ export async function executeSocialTool(
       return JSON.stringify({ success: true, message_id: msg.message_id, chat_id: chatId });
     }
 
+    // ── schedule_message ─────────────────────────────────────────────────────
+    case 'schedule_message': {
+      const chatId  = String(input.chat_id ?? '').trim();
+      const text    = String(input.text ?? '').trim();
+      const timeStr = String(input.time ?? '').trim();
+
+      if (!chatId || !text || !timeStr) {
+        return JSON.stringify({ error: 'chat_id, text, and time are all required' });
+      }
+
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) return JSON.stringify({ error: 'TELEGRAM_BOT_TOKEN not set' });
+
+      const targetMs = parseScheduleTime(timeStr);
+      if (targetMs === null) {
+        return JSON.stringify({ error: `Could not parse time: "${timeStr}". Use formats like "1:40 AM", "13:45".` });
+      }
+
+      const delayMs = targetMs - Date.now();
+      if (delayMs < 0) {
+        return JSON.stringify({ error: 'Scheduled time is in the past' });
+      }
+
+      setTimeout(async () => {
+        try {
+          const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ chat_id: chatId, text }),
+          });
+          const data = await res.json() as Record<string, unknown>;
+          if (data.ok) {
+            console.log(`[schedule_message] Sent to chat ${chatId} at ${new Date().toISOString()}`);
+          } else {
+            console.error(`[schedule_message] Telegram error:`, data.description);
+          }
+        } catch (err) {
+          console.error(`[schedule_message] Failed:`, (err as Error).message);
+        }
+      }, delayMs);
+
+      const scheduledTime = new Date(targetMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const delayMinutes  = Math.round(delayMs / 60_000);
+      return JSON.stringify({
+        success:         true,
+        scheduled_at:    scheduledTime,
+        delay_minutes:   delayMinutes,
+        message_preview: text.slice(0, 80),
+      });
+    }
+
     default:
       return JSON.stringify({ error: `Unknown social tool: ${name}` });
   }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Parse a human-readable time string into a future Unix timestamp (ms).
+ * If the parsed time is already in the past today, schedules for tomorrow.
+ * Returns null if the string cannot be parsed.
+ */
+function parseScheduleTime(timeStr: string): number | null {
+  const s = timeStr.trim();
+
+  // Match "1:40 AM", "01:40AM", "1:40 PM" etc.
+  const match12h = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  // Match "13:45", "01:40"
+  const match24h = s.match(/^(\d{1,2}):(\d{2})$/);
+
+  let hours: number, minutes: number;
+
+  if (match12h) {
+    hours   = parseInt(match12h[1], 10);
+    minutes = parseInt(match12h[2], 10);
+    const period = match12h[3].toUpperCase();
+    if (period === 'PM' && hours !== 12) hours += 12;
+    if (period === 'AM' && hours === 12) hours  = 0;
+  } else if (match24h) {
+    hours   = parseInt(match24h[1], 10);
+    minutes = parseInt(match24h[2], 10);
+  } else {
+    return null;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+  const target = new Date();
+  target.setHours(hours, minutes, 0, 0);
+
+  // If already past, schedule for tomorrow
+  if (target.getTime() <= Date.now()) {
+    target.setDate(target.getDate() + 1);
+  }
+
+  return target.getTime();
 }

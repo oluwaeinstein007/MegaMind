@@ -148,7 +148,9 @@ export class TelegramBot {
 
       const isGroup     = chatType === 'group' || chatType === 'supergroup';
       const senderName  = ctx.from?.first_name ?? 'User';
-      const agentPrompt = isGroup ? `[${senderName}]: ${userMessage}` : userMessage;
+      const agentPrompt = isGroup
+        ? `[chat_id: ${chatId}] [${senderName}]: ${userMessage}`
+        : `[chat_id: ${chatId}] ${userMessage}`;
 
       const sid = this.sessionId(chatType, chatId, userId);
       this.touch(sid);
