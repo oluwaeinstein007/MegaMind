@@ -5,7 +5,7 @@
  *   • search_travel_content  — Qdrant semantic search with SQLite fallback
  *   • sample_travel_content  — random chunk sampling
  *
- * Social media tools (broadcast, linkedin, twitter, etc.) live in social-agent/.
+ * Social media tools (broadcast, linkedin, twitter, etc.) live in journvibe/.
  */
 
 export interface FunctionDeclaration {

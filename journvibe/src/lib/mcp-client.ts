@@ -107,7 +107,7 @@ export class SocialMCPClient {
     });
 
     this.client = new Client(
-      { name: 'nomadsage-social-agent', version: '1.0.0' },
+      { name: 'journvibe', version: '1.0.0' },
       { capabilities: {} }
     );
 

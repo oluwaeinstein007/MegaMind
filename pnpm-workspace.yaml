@@ -1,6 +1,6 @@
 packages:
   - travel-agent
-  - social-agent
+  - journvibe
 
 onlyBuiltDependencies:
   - better-sqlite3

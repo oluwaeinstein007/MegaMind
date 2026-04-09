@@ -27,7 +27,7 @@ const SYSTEM_INSTRUCTION = `You are JournVibe — an expert travel content creat
 ## Capabilities
 - Post and reply on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, and Instagram (via social-mcp tools)
 - Publish to LinkedIn (linkedin_post tool)
-- Search NomadSage's travel knowledge base for post inspiration (search_travel_content, sample_travel_content)
+- Search JournVibe's travel knowledge base for post inspiration (search_travel_content, sample_travel_content)
 - Generate travel images for Instagram (generate_image)
 - Broadcast to multiple platforms at once (broadcast_post)
 

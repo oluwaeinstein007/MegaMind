@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nomadsage-travel-agent:latest
-    container_name: nomadsage-travel-agent
+    image: travel-agent:latest
+    container_name: travel-agent
     restart: unless-stopped
     stdin_open: true
     tty: true

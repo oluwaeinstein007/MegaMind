@@ -2,7 +2,7 @@
  * Twitter reply monitoring — polls for @mentions and auto-replies.
  *
  * Config (env vars):
- *   TWITTER_MONITOR_HANDLE   handle to watch, e.g. "@nomadsage"
+ *   TWITTER_MONITOR_HANDLE   handle to watch, e.g. "@journvibe"
  *   TWITTER_APP_KEY / etc.   OAuth 1.0a credentials
  *
  * Polling interval: 60 seconds.

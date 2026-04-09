@@ -26,7 +26,7 @@ export const SOCIAL_TOOLS: FunctionDeclaration[] = [
   {
     name: 'search_travel_content',
     description:
-      "Search NomadSage's travel knowledge base for content to base posts on. " +
+      "Search JournVibe's travel knowledge base for content to base posts on. " +
       'Always call this before composing a travel post — grounds content in ' +
       'real visa requirements, destination guides, budgets, and tips. ' +
       'Uses Qdrant semantic search when available, SQLite keyword search as fallback.',
@@ -48,7 +48,7 @@ export const SOCIAL_TOOLS: FunctionDeclaration[] = [
   {
     name: 'sample_travel_content',
     description:
-      "Return a random sample of travel chunks from NomadSage's database. " +
+      "Return a random sample of travel chunks from JournVibe's database. " +
       'Use when you need post inspiration without a specific topic in mind.',
     parameters: {
       type: 'object',

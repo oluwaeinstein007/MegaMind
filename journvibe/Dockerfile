@@ -13,15 +13,15 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 # Copy the agent package manifest so pnpm resolves its deps
-COPY social-agent/package.json ./social-agent/
+COPY journvibe/package.json ./journvibe/
 
-# Install only social-agent's dependencies into its package folder
-RUN pnpm --dir social-agent install --frozen-lockfile --workspace-root=false
+# Install only journvibe's dependencies into its package folder
+RUN pnpm --dir journvibe install --frozen-lockfile --workspace-root=false
 
 # Copy source and build
-COPY social-agent/tsconfig.json ./social-agent/
-COPY social-agent/src/ ./social-agent/src/
-RUN pnpm --dir social-agent build
+COPY journvibe/tsconfig.json ./journvibe/
+COPY journvibe/src/ ./journvibe/src/
+RUN pnpm --dir journvibe build
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
@@ -32,11 +32,11 @@ RUN apk upgrade --no-cache \
 WORKDIR /app
 
 COPY --from=builder /app/node_modules/.pnpm ./node_modules/.pnpm
-COPY --from=builder /app/social-agent/node_modules ./social-agent/node_modules
-COPY --from=builder /app/social-agent/dist ./social-agent/dist
-COPY social-agent/package.json ./social-agent/
+COPY --from=builder /app/journvibe/node_modules ./journvibe/node_modules
+COPY --from=builder /app/journvibe/dist ./journvibe/dist
+COPY journvibe/package.json ./journvibe/
 
-WORKDIR /app/social-agent
+WORKDIR /app/journvibe
 
 # Mount MegaMind SQLite DB at /data/ingestor.db
 VOLUME ["/data"]

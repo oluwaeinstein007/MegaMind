@@ -1,5 +1,5 @@
 /**
- * NomadSage Social — Telegram Bot (polling-based, Telegraf)
+ * JournVibe — Telegram Bot (polling-based, Telegraf)
  *
  * Acts as a command interface for the social media agent.
  * Users can request posts, broadcasts, and content creation via chat.
@@ -68,7 +68,7 @@ export class TelegramBot {
 
   private groupIntro(mention: string): string {
     return (
-      `I'm NomadSage Social — your AI travel content & social media manager.\n` +
+      `I'm JournVibe — your AI travel content & social media manager.\n` +
       `Tag me (${mention}) or reply to my messages to post!\n\n` +
       `I can post on Twitter/X, Telegram, Discord, Slack, WhatsApp, Facebook, Instagram & LinkedIn.`
     );
@@ -92,7 +92,7 @@ export class TelegramBot {
         ctx.reply(this.groupIntro(mention));
       } else {
         ctx.reply(
-          `Hello ${name}! I'm NomadSage Social, your travel content & social media agent.\n\n` +
+          `Hello ${name}! I'm JournVibe, your travel content & social media agent.\n\n` +
           `Tell me what to post and where:\n` +
           `  "Post a travel tip about Bali on Twitter"\n` +
           `  "Broadcast a Lisbon guide to twitter, telegram and discord"\n` +
@@ -116,7 +116,7 @@ export class TelegramBot {
       const isGroup = ctx.chat?.type !== 'private';
       const mention = ctx.botInfo?.username ? `@${ctx.botInfo.username}` : 'me';
       ctx.reply(
-        `*NomadSage Social Media Manager*\n\n` +
+        `*JournVibe Social Media Manager*\n\n` +
         `*Commands:*\n` +
         `/clear — Reset conversation history\n` +
         `/help  — Show this help\n\n` +

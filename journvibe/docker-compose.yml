@@ -1,10 +1,10 @@
 services:
-  social-agent:
+  journvibe:
     build:
       context: .
       dockerfile: Dockerfile
-    image: nomadsage-social-agent:latest
-    container_name: nomadsage-social-agent
+    image: journvibe:latest
+    container_name: journvibe
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -13,7 +13,7 @@ services:
       - "${WEBHOOK_PORT:-3456}:3456"
     volumes:
       - ${MEGAMIND_DIST_PATH:-../dist}:/data:ro   # MegaMind SQLite DB (read-only)
-      - social-agent-memory:/app/memory            # persistent session memory
+      - journvibe-memory:/app/memory               # persistent session memory
 
 volumes:
-  social-agent-memory:
+  journvibe-memory:
