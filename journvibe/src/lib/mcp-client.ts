@@ -9,7 +9,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { FunctionDeclaration } from '../tools/social.js';
+export interface FunctionDeclaration {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

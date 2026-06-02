@@ -39,7 +39,7 @@ function travelDbStatus(): string {
 }
 
 function printBanner(verbose: boolean): void {
-  const model     = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  const model     = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash';
   const db        = travelDbStatus();
   const platforms = readyPlatforms();
   const platformStr = platforms.length > 0 ? platforms.join(' · ') : 'none configured';

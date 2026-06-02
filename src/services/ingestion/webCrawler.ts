@@ -92,8 +92,8 @@ export class WebCrawler {
     const parseSitemapXml = (xml: string): string[] => {
       const $ = cheerio.load(xml, { xmlMode: true });
       const found: string[] = [];
-      $('url > loc').each((_, el) => found.push($(el).text().trim()));
-      $('sitemap > loc').each((_, el) => found.push($(el).text().trim()));
+      $('url > loc').each((_, el) => { found.push($(el).text().trim()); });
+      $('sitemap > loc').each((_, el) => { found.push($(el).text().trim()); });
       return found.filter(u => {
         try { return new URL(u).origin === this.baseUrl.origin; } catch { return false; }
       });
@@ -112,7 +112,7 @@ export class WebCrawler {
       // Fetch sub-sitemaps (sitemap index, one level deep)
       const $ = cheerio.load(text, { xmlMode: true });
       const subSitemaps: string[] = [];
-      $('sitemap > loc').each((_, el) => subSitemaps.push($(el).text().trim()));
+      $('sitemap > loc').each((_, el) => { subSitemaps.push($(el).text().trim()); });
 
       for (const subUrl of subSitemaps.slice(0, 5)) {
         try {

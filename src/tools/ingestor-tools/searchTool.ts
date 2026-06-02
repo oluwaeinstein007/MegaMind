@@ -1,37 +1,48 @@
 import { z } from 'zod';
+import { tool } from '@veridex/agents';
 import { IngestorService } from '../../services/ingestorService.js';
 
-const schema = z.object({
-  query: z.string().min(1).describe('The natural-language query to search for semantically similar content.'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(20)
-    .optional()
-    .describe('Maximum number of results to return (default: 5).'),
-});
-
-export const searchTool = {
-  name: 'SEMANTIC_SEARCH_TOOL',
-  description:
-    'Performs a semantic similarity search over all ingested content. ' +
-    'Returns the most relevant chunks ranked by cosine similarity score. ' +
-    'Use this to find information related to a user query from the ingested knowledge base.',
-  parameters: schema,
-  execute: async (args: z.infer<typeof schema>) => {
-    console.log(`[SEMANTIC_SEARCH_TOOL] Query: "${args.query}" (limit=${args.limit ?? 5})`);
+export const searchTool = tool({
+  name: 'semantic_search',
+  guidance: {
+    summary: 'Performs a semantic similarity search over all ingested travel and visa content.',
+    whenToUse: [
+      'The user asks a factual question about visas, entry requirements, destinations, budgets, or travel advice.',
+      'To retrieve contextually relevant groundings before drafting any travel advisory post or advice.',
+    ],
+    whenNotToUse: [
+      'To list every raw document or paginated chunk in the database — use `list_documents` instead.',
+      'To fetch a single document chunk by its integer database ID — use `get_document` instead.',
+    ],
+    successExample: 'Search results for: "Thailand tourist visa"\n--- Result 1 (score: 92.4%) ---\nSource : https://thai-embassy.com\nContent: Tourist visas allow stays of up to 60 days...',
+  },
+  input: z.object({
+    query: z.string().min(1).describe('The natural-language query to search for semantically similar content.'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .optional()
+      .describe('Maximum number of results to return (default: 5).'),
+  }),
+  safetyClass: 'read',
+  async execute({ input }) {
+    console.log(`[semantic_search] Query: "${input.query}" (limit=${input.limit ?? 5})`);
 
     try {
       const service = new IngestorService();
-      const results = await service.searchSimilar(args.query, args.limit ?? 5);
+      const results = await service.searchSimilar(input.query, input.limit ?? 5);
       await service.close();
 
       if (results.length === 0) {
-        return 'No results found. Make sure content has been ingested first using INGEST_URL_TOOL or INGEST_FILE_TOOL.';
+        return {
+          success: true,
+          llmOutput: 'No results found. Make sure content has been ingested first using `ingest_url` or `ingest_file`.',
+        };
       }
 
-      const lines: string[] = [`Search results for: "${args.query}"`, ''];
+      const lines: string[] = [`Search results for: "${input.query}"`, ''];
 
       for (let i = 0; i < results.length; i++) {
         const r = results[i];
@@ -51,11 +62,18 @@ export const searchTool = {
         lines.push('');
       }
 
-      return lines.join('\n');
+      return {
+        success: true,
+        llmOutput: lines.join('\n'),
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[SEMANTIC_SEARCH_TOOL] Error: ${message}`);
-      throw new Error(`Search failed: ${message}`);
+      console.error(`[semantic_search] Error: ${message}`);
+      return {
+        success: false,
+        llmOutput: `Search failed: ${message}`,
+        error: message,
+      };
     }
   },
-};
+});

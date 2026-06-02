@@ -11,30 +11,49 @@ import { listDocumentsTool } from './tools/ingestor-tools/listDocumentsTool.js';
 import { ingestRssTool } from './tools/ingestor-tools/ingestRssTool.js';
 
 async function main() {
-  console.log('Initializing MegaMind MCP Server...');
+  console.log('Initializing Veridex-Native MegaMind MCP Server...');
 
   const server = new FastMCP({
     name: 'MegaMind MCP Server',
-    version: '1.1.0',
+    version: '1.2.0',
   });
 
-  // Domain-specific tools
-  server.addTool(getVisaInfoByCountry);
-  server.addTool(getImmigrationInfoByCountry);
+  // Helper to adapt @veridex/agents ToolContract to FastMCP tool
+  function registerVeridexTool(veridexTool: any) {
+    server.addTool({
+      name: veridexTool.name,
+      description: veridexTool.description,
+      parameters: veridexTool.input,
+      execute: async (args: any) => {
+        console.log(`[mcp-server] Running tool ${veridexTool.name}`);
+        const result = await veridexTool.execute({
+          input: args,
+          context: {
+            runId: `mcp-${Date.now()}`,
+            agentId: 'mcp-server',
+            turnIndex: 0,
+          },
+        });
 
-  // Ingestion tools
-  server.addTool(ingestUrlTool);
-  server.addTool(ingestFileTool);
-  server.addTool(ingestAllUrlsTool);
-  server.addTool(ingestRssTool);
+        if (!result.success) {
+          throw new Error(result.error || result.llmOutput);
+        }
+        return result.llmOutput;
+      },
+    });
+  }
 
-  // Retrieval and search tools
-  server.addTool(searchTool);
-  server.addTool(getDocumentTool);
-  server.addTool(listDocumentsTool);
-
-  // Management tools
-  server.addTool(deleteDocumentTool);
+  // Register all adapted tools
+  registerVeridexTool(getVisaInfoByCountry);
+  registerVeridexTool(getImmigrationInfoByCountry);
+  registerVeridexTool(ingestUrlTool);
+  registerVeridexTool(ingestFileTool);
+  registerVeridexTool(ingestAllUrlsTool);
+  registerVeridexTool(ingestRssTool);
+  registerVeridexTool(searchTool);
+  registerVeridexTool(getDocumentTool);
+  registerVeridexTool(listDocumentsTool);
+  registerVeridexTool(deleteDocumentTool);
 
   try {
     await server.start({ transportType: 'stdio' });

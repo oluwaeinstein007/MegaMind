@@ -1,6 +1,7 @@
 packages:
   - travel-agent
   - journvibe
+  - travel-planner
 
 onlyBuiltDependencies:
   - better-sqlite3

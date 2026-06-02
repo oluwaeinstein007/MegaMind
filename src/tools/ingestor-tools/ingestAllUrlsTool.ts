@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { tool } from '@veridex/agents';
 import { IngestorService } from '../../services/ingestorService.js';
 import {
   getUrlsByCategory,
@@ -7,35 +8,43 @@ import {
   TravelUrlsDataset,
 } from '../../data/travel-urls-dataset.js';
 
-const schema = z.object({
-  category: z
-    .string()
-    .optional()
-    .describe(
-      "Optional category to ingest (e.g. 'visa', 'flights'). Omit to ingest all available URLs."
-    ),
-});
-
-export const ingestAllUrlsTool = {
-  name: 'INGEST_ALL_URLS_TOOL',
-  description:
-    'Ingests content from the built-in travel URL dataset, either for a specific category or all 200+ URLs. ' +
-    'Duplicate content is automatically skipped.',
-  parameters: schema,
-  execute: async (args: z.infer<typeof schema>) => {
+export const ingestAllUrlsTool = tool({
+  name: 'ingest_all_urls',
+  guidance: {
+    summary: 'Ingests content from the built-in travel URL dataset, either for a specific category or all available categories.',
+    whenToUse: [
+      'The user asks to seed the database, load preset travel sites, or crawl predefined directories (like visa or flights preset categories).',
+      'During initialization or bulk ingestion setups.',
+    ],
+    whenNotToUse: [
+      'For crawling arbitrary new URLs — use `ingest_url` instead.',
+      'For ingesting single uploaded or local files — use `ingest_file` instead.',
+    ],
+    successExample: 'Ingestion summary for flights category:\n  URLs processed    : 10\n  Total new chunks  : 50\n  Total skipped     : 10\n  Failed URLs       : 0',
+  },
+  input: z.object({
+    category: z
+      .string()
+      .optional()
+      .describe("Optional category to ingest (e.g. 'visa', 'flights'). Omit to ingest all available categories."),
+  }),
+  safetyClass: 'network',
+  async execute({ input }) {
     const service = new IngestorService();
     await service.initialize();
 
     let urlsToIngest: string[];
     let label: string;
 
-    if (args.category) {
-      const category = args.category.toLowerCase();
+    if (input.category) {
+      const category = input.category.toLowerCase();
       const available = getCategories();
       if (!available.includes(category)) {
-        throw new Error(
-          `Unknown category '${args.category}'. Available: ${available.join(', ')}`
-        );
+        return {
+          success: false,
+          llmOutput: `Unknown category '${input.category}'. Available: ${available.join(', ')}`,
+          error: 'Invalid category',
+        };
       }
       urlsToIngest = getUrlsByCategory(category as keyof TravelUrlsDataset).map(item =>
         item.url.trim()
@@ -47,10 +56,14 @@ export const ingestAllUrlsTool = {
     }
 
     if (urlsToIngest.length === 0) {
-      return `No URLs found for ${label}.`;
+      await service.close();
+      return {
+        success: true,
+        llmOutput: `No URLs found for ${label}.`,
+      };
     }
 
-    console.log(`[INGEST_ALL_URLS_TOOL] Processing ${urlsToIngest.length} URL(s) in ${label}`);
+    console.log(`[ingest_all_urls] Processing ${urlsToIngest.length} URL(s) in ${label}`);
 
     const details: string[] = [];
     let totalIngested = 0;
@@ -65,7 +78,7 @@ export const ingestAllUrlsTool = {
         details.push(`  OK  ${url} — ${result.ingestedCount} new, ${result.skippedCount} skipped`);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`[INGEST_ALL_URLS_TOOL] Failed: ${url} — ${message}`);
+        console.error(`[ingest_all_urls] Failed: ${url} — ${message}`);
         details.push(`  ERR ${url} — ${message}`);
         failed++;
       }
@@ -73,7 +86,7 @@ export const ingestAllUrlsTool = {
 
     await service.close();
 
-    return [
+    const output = [
       `Ingestion summary for ${label}:`,
       `  URLs processed    : ${urlsToIngest.length}`,
       `  Total new chunks  : ${totalIngested}`,
@@ -83,5 +96,10 @@ export const ingestAllUrlsTool = {
       'Details:',
       ...details,
     ].join('\n');
+
+    return {
+      success: true,
+      llmOutput: output,
+    };
   },
-};
+});

@@ -1,7 +1,7 @@
 /**
- * JournVibe Social Media Manager — Gemini function-calling loop
+ * JournVibe Social Media Manager — Veridex-powered Agent Runtime
  *
- * A dedicated social media agent powered by Google Gemini.
+ * A dedicated social media agent powered by the Veridex Agent Fabric SDK and Google Gemini.
  * Creates and publishes travel content across Twitter/X, Telegram,
  * Discord, Slack, WhatsApp, Facebook, Instagram, and LinkedIn.
  *
@@ -10,17 +10,19 @@
  */
 
 import {
-  GoogleGenerativeAI,
-  type Content,
-  type FunctionCall,
-  type FunctionDeclarationsTool,
-  type FunctionResponsePart,
-} from '@google/generative-ai';
+  createAgent,
+  GeminiProvider,
+  InMemoryTranscriptStore,
+  type TranscriptEntry,
+  type RunResult,
+  AgentRuntime,
+  tool,
+} from '@veridex/agents';
+import { z } from 'zod';
+import readline from 'readline';
 import { SocialMCPClient } from './lib/mcp-client.js';
-import { SOCIAL_TOOLS, SOCIAL_TOOL_NAMES, executeSocialTool } from './tools/social.js';
+import { createJournVibeTools } from './tools/social.js';
 import { createSession, loadHistory, saveHistory } from './lib/memory.js';
-
-const DEFAULT_MODEL = 'gemini-2.0-flash';
 
 const SYSTEM_INSTRUCTION = `You are JournVibe — an expert travel content creator and social media manager.
 
@@ -82,111 +84,171 @@ export async function runAgent(
 
   // ── Session / memory ───────────────────────────────────────────────────────
   const sessionId = options.sessionId ?? createSession();
-  const history   = loadHistory(sessionId);
+  const history = loadHistory(sessionId);
 
   // ── social-mcp connection ──────────────────────────────────────────────────
   const socialClient = new SocialMCPClient();
   await socialClient.connect();
 
-  let socialToolNames: Set<string>;
-  let socialGeminiTools: Awaited<ReturnType<typeof socialClient.listToolsAsGemini>>;
+  let veridexMCPTools: any[] = [];
+  let localTools: any[] = [];
 
   try {
-    socialGeminiTools = await socialClient.listToolsAsGemini();
-    socialToolNames   = new Set(socialGeminiTools.map((t) => t.name));
-    if (verbose) console.error(`[agent] social-mcp tools: ${[...socialToolNames].join(', ')}`);
+    const socialGeminiTools = await socialClient.listToolsAsGemini();
+    veridexMCPTools = socialGeminiTools.map((t) => {
+      // Dynamic mapping of social MCP tools into Veridex ToolContracts
+      return tool({
+        name: t.name,
+        description: t.description ?? '',
+        input: z.record(z.any()),
+        safetyClass: 'write',
+        async execute({ input }: any) {
+          if (verbose) {
+            console.error(`[mcp-tool→] ${t.name}`, JSON.stringify(input, null, 2));
+          }
+          const response = await socialClient.callTool(t.name, input);
+          return {
+            success: true,
+            llmOutput: response,
+          };
+        },
+      });
+    });
+
+    // Create the adapted JournVibe tools
+    localTools = createJournVibeTools(socialClient);
   } catch (err) {
     await socialClient.disconnect();
     throw new Error(`Failed to list social-mcp tools: ${(err as Error).message}`);
   }
 
-  // Combine social-mcp tools with local social tools
-  const allTools: FunctionDeclarationsTool[] = [
-    { functionDeclarations: socialGeminiTools as FunctionDeclarationsTool['functionDeclarations'] },
-    { functionDeclarations: SOCIAL_TOOLS      as FunctionDeclarationsTool['functionDeclarations'] },
-  ];
-
-  // ── Gemini client ──────────────────────────────────────────────────────────
+  // ── Gemini Provider ────────────────────────────────────────────────────────
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set.');
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: process.env.GEMINI_MODEL ?? DEFAULT_MODEL,
-    systemInstruction: SYSTEM_INSTRUCTION,
-    tools: allTools,
+  const geminiProvider = new GeminiProvider({
+    apiKey,
+    model: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash',
   });
 
-  const chat = model.startChat({ history });
+  const transcriptStore = new InMemoryTranscriptStore();
 
-  try {
-    // ── Gemini function-calling loop ─────────────────────────────────────────
-    let currentPrompt: string | FunctionResponsePart[] = userPrompt;
+  const agent = createAgent(
+    {
+      id: 'journvibe-social-agent',
+      name: 'JournVibe Media Manager',
+      model: { provider: 'gemini', model: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash' },
+      instructions: SYSTEM_INSTRUCTION,
+      tools: [...localTools, ...veridexMCPTools],
+      policies: [
+        // Intercept all tools marked with safety class 'write' (like social post execution)
+        { type: 'requireApprovalFor', params: { safetyClasses: ['write'] } },
+      ],
+      maxTurns: 8,
+    },
+    {
+      modelProviders: {
+        gemini: geminiProvider,
+      },
+      transcriptStore,
+      enableTracing: verbose,
+      enableCheckpoints: false,
+      approvalRoutes: [
+        // Route 'write' safety class tools to human interactive approval
+        { match: (proposal: any) => proposal.safetyClass === 'write', mode: 'human_required' },
+      ],
+      approvalHandlers: {
+        // Human-in-the-loop CLI console interactive approval handler
+        human_required: async (request: any) => {
+          console.log(`\n⚠️  [POLICY GATE: APPROVAL REQUIRED]`);
+          console.log(`Action  : ${request.proposal.type === 'tool_call' ? `Tool Execution` : 'State change'}`);
+          console.log(`Resource: ${request.proposal.name}`);
+          console.log(`Payload :`, JSON.stringify(request.proposal.arguments, null, 2));
 
-    while (true) {
-      const result    = await chat.sendMessage(currentPrompt);
-      const response  = result.response;
-      const candidate = response.candidates?.[0];
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await new Promise<string>((resolve) => {
+            rl.question(`Approve this social posting action? (y/N): `, (ans) => {
+              rl.close();
+              resolve(ans.trim().toLowerCase());
+            });
+          });
 
-      if (!candidate) throw new Error('Gemini returned no candidates.');
+          const approved = answer === 'y' || answer === 'yes';
 
-      const parts = candidate.content?.parts ?? [];
-
-      const functionCalls = parts
-        .filter((p): p is { functionCall: FunctionCall } => !!p.functionCall)
-        .map((p) => p.functionCall);
-
-      // No function calls → final answer
-      if (functionCalls.length === 0) {
-        const text = parts
-          .filter((p): p is { text: string } => typeof p.text === 'string')
-          .map((p) => p.text)
-          .join('');
-
-        const updatedHistory = await chat.getHistory();
-        saveHistory(sessionId, updatedHistory as Content[]);
-
-        return { text: text || '[No response]', sessionId };
-      }
-
-      // Execute function calls
-      const functionResponses: FunctionResponsePart[] = [];
-
-      for (const call of functionCalls) {
-        const { name, args } = call;
-        const input = (args ?? {}) as Record<string, unknown>;
-
-        if (verbose) console.error(`\n[tool→] ${name}`, JSON.stringify(input, null, 2));
-
-        let responseContent: unknown;
-
-        try {
-          if (SOCIAL_TOOL_NAMES.has(name)) {
-            const raw = await executeSocialTool(
-              name,
-              input,
-              (toolName, toolArgs) => socialClient.callTool(toolName, toolArgs)
-            );
-            responseContent = JSON.parse(raw);
-          } else if (socialToolNames.has(name)) {
-            const text = await socialClient.callTool(name, input);
-            responseContent = { result: text };
+          if (approved) {
+            console.log(`✅ Action approved by operator. Resuming execution...`);
           } else {
-            responseContent = { error: `Unknown tool: ${name}` };
+            console.log(`❌ Action denied by operator. Aborting execution.`);
           }
-        } catch (err) {
-          responseContent = { error: (err as Error).message };
-        }
 
-        if (verbose) console.error(`[←tool] ${JSON.stringify(responseContent).slice(0, 300)}`);
+          return {
+            requestId: request.id,
+            approved,
+            decidedBy: 'console-operator',
+            decidedAt: Date.now(),
+          };
+        },
+      },
+    }
+  );
 
-        functionResponses.push({
-          functionResponse: { name, response: responseContent as Record<string, unknown> },
+  // Hook to pre-load chat history from SQLite database
+  const beforeRunHook = {
+    name: 'seed_history',
+    phase: 'beforeRun' as const,
+    execute: async (ctx: any) => {
+      const currentEntries = await transcriptStore.list(ctx.runId);
+      const historyEntries: TranscriptEntry[] = [];
+      let hIndex = 0;
+
+      for (const item of history) {
+        const roleKind = item.role === 'model' ? 'model_output' : 'user_input';
+        const text = item.parts.map((p) => p.text).join('\n');
+        historyEntries.push({
+          id: `hist_${hIndex}_${Math.random().toString(36).slice(2, 8)}`,
+          runId: ctx.runId,
+          agentId: ctx.agentId,
+          turnIndex: hIndex++,
+          kind: roleKind,
+          content: text,
+          timestamp: Date.now() - (history.length - hIndex) * 1000,
         });
       }
 
-      currentPrompt = functionResponses;
-    }
+      // Adjust index of current entries
+      const adjustedCurrent = currentEntries.map((entry) => ({
+        ...entry,
+        turnIndex: (entry.turnIndex ?? 0) + history.length,
+      }));
+
+      await transcriptStore.replace(ctx.runId, [...historyEntries, ...adjustedCurrent]);
+    },
+  };
+
+  agent.definition.hooks = {
+    beforeRun: [beforeRunHook],
+  };
+
+  try {
+    const runResult = await agent.run(userPrompt);
+
+    // Save final output history back to SQLite memory.db
+    const runEntries = await transcriptStore.list(runResult.run.id);
+    const newEntries = runEntries.filter((entry) => (entry.turnIndex ?? 0) >= history.length);
+
+    const newContents = newEntries
+      .filter((entry) => entry.kind === 'user_input' || entry.kind === 'model_output')
+      .map((entry) => ({
+        role: entry.kind === 'model_output' ? ('model' as const) : ('user' as const),
+        parts: [{ text: entry.content }],
+      }));
+
+    saveHistory(sessionId, [...history, ...newContents]);
+
+    return {
+      text: runResult.output || '[No response]',
+      sessionId,
+    };
   } finally {
     await socialClient.disconnect();
   }

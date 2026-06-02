@@ -38,7 +38,7 @@ function travelDbStatus(): string {
 }
 
 function printBanner(verbose: boolean): void {
-  const model   = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+  const model   = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash';
   const db      = travelDbStatus();
   const webhook = process.env.WEBHOOK_ENABLED === 'true' ? `port ${process.env.WEBHOOK_PORT ?? '3456'}` : 'disabled';
   const twitter = process.env.TWITTER_MONITOR_HANDLE ?? 'not watching';

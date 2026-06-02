@@ -67,7 +67,7 @@ export class RSSParser {
       if (!content && !link) return;
 
       const categories: string[] = [];
-      $el.find('category').each((_, cat) => categories.push($(cat).text().trim()));
+      $el.find('category').each((_, cat) => { categories.push($(cat).text().trim()); });
 
       items.push({
         title: $el.find('title').first().text().trim(),

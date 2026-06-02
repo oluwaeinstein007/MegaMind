@@ -17,6 +17,7 @@
     "trigger": "tsx src/index.ts --trigger-now"
   },
   "dependencies": {
+    "@veridex/agents": "link:../../packages/agents",
     "@google/generative-ai": "^0.21.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@qdrant/js-client-rest": "^1.15.0",
