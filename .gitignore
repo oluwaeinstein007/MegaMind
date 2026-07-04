@@ -16,3 +16,6 @@ Thumbs.db
 
 # Environment variables
 .env
+
+# Local runtime SQLite databases (session memory, TVA login sessions, etc.)
+*.db

@@ -10,6 +10,10 @@
 # Prerequisites:
 #   Run the ingestor once to populate the SQLite DB:
 #     docker compose -f docker-compose.ingest.yml run --rm ingest
+#   For travel-agent's flight/hotel/visa/immigration booking tools, build the
+#   sibling TravelAgentMCP repo's mcps/* servers once (or set TVA_MCP_ENABLED=false
+#   in travel-agent/.env to run without them):
+#     pnpm --dir ../TravelAgentMCP install && pnpm --dir ../TravelAgentMCP run build
 #
 # Usage:
 #   docker compose up -d                  # start both agents
@@ -35,6 +39,7 @@ services:
       - "${TRAVEL_WEBHOOK_PORT:-3458}:3456"
     volumes:
       - megamind_data:/data:ro
+      - ${TVA_MCP_DIST_PATH:-../TravelAgentMCP/mcps}:/tva-mcp:ro
       - travel-agent-memory:/app/memory
 
   # ── JournVibe Social Media Manager ────────────────────────────────────────

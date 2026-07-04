@@ -10,8 +10,13 @@ services:
     tty: true
     env_file: .env
     volumes:
-      - ${MEGAMIND_DIST_PATH:-../dist}:/data:ro   # MegaMind SQLite DB (read-only)
-      - travel-agent-memory:/app/memory            # persistent session memory
+      - ${MEGAMIND_DIST_PATH:-../dist}:/data:ro                         # MegaMind SQLite DB (read-only)
+      - ${TVA_MCP_DIST_PATH:-../../TravelAgentMCP/mcps}:/tva-mcp:ro     # TVA booking MCP servers, pre-built (read-only)
+      - travel-agent-memory:/app/memory                                 # persistent session + TVA login memory
+
+# Prerequisite: build TravelAgentMCP's mcps/* once before starting this service:
+#   pnpm --dir ../../TravelAgentMCP install && pnpm --dir ../../TravelAgentMCP run build
+# Or set TVA_MCP_ENABLED=false in .env to run without booking tools.
 
 volumes:
   travel-agent-memory:

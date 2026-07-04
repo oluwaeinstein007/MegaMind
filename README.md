@@ -70,6 +70,18 @@ Both stores share the same deterministic chunk UUID, enabling hybrid retrieval: 
 
 ---
 
+## Monorepo Sub-Packages
+
+This is a pnpm workspace (see `pnpm-workspace.yaml`). Besides the ingestor MCP server documented below:
+
+- **`travel-agent/`** — **NomadSage**, a Gemini-powered travel advisor. Answers questions grounded in this
+  repo's knowledge base (via `search_travel_content`/`sample_travel_content`) with source citations, replies on
+  Twitter/Telegram/Discord/Slack/WhatsApp via [social-mcp](https://www.npmjs.com/package/social-mcp), and — when
+  the sibling [TravelAgentMCP](https://github.com/nxGnosis/travelagent-mcp) repo is checked out and built — can
+  search and book real flights and hotels and track visa/immigration applications on the TVA OTA platform. See
+  `travel-agent/README.md` (agent) and `TravelAgentMCP/README.md` (booking MCP servers + guardrails) for details.
+- **`journvibe/`** — social media content manager.
+
 ## Installation
 
 ### Prerequisites

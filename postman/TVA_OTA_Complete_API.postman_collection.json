@@ -1,0 +1,71 @@
+{
+  "info": {
+    "_postman_id": "tva-ota-complete-api-v1",
+    "name": "TVA OTA – Complete API",
+    "description": "Complete API reference for the TVA OTA backend. Covers all public, user, admin, merchant, affiliate and career endpoints. Set base_url to your server address.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",               "value": "http://localhost:8000", "type": "string" },
+    { "key": "token",                  "value": "", "type": "string", "description": "User Bearer token – auto-set by Login" },
+    { "key": "admin_token",            "value": "", "type": "string", "description": "Admin Bearer token – auto-set by Admin Login" },
+    { "key": "merchant_token",         "value": "", "type": "string", "description": "Merchant Bearer token – auto-set by Merchant Login" },
+    { "key": "affiliate_token",        "value": "", "type": "string", "description": "Affiliate Bearer token – auto-set by Affiliate Login" },
+    { "key": "user_uuid",              "value": "", "type": "string", "description": "user_uuid – auto-set by Login" },
+    { "key": "tvaId",                  "value": "", "type": "string" },
+    { "key": "cancelUuid",             "value": "", "type": "string" },
+    { "key": "flightBookingId",        "value": "", "type": "string" },
+    { "key": "hotelBookingId",         "value": "", "type": "string" },
+    { "key": "visaBookingId",          "value": "", "type": "string" },
+    { "key": "immigrationBookingId",   "value": "", "type": "string" },
+    { "key": "consultationId",         "value": "", "type": "string" },
+    { "key": "notificationId",         "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "01 – Auth",
+      "item": [
+        {
+          "name": "User Auth",
+          "item": [
+            {"name":"Register","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/register","host":["{{base_url}}"],"path":["api","v1","user","register"]},"body":{"mode":"raw","raw":"{\"name\":\"John Doe\",\"email\":\"john@example.com\",\"password\":\"password\",\"password_confirmation\":\"password\",\"phone\":\"+2348012345678\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Login","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/login","host":["{{base_url}}"],"path":["api","v1","user","login"]},"body":{"mode":"raw","raw":"{\"email\":\"john@example.com\",\"password\":\"password\"}","options":{"raw":{"language":"json"}}}},"event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) {","  var r = pm.response.json();","  pm.collectionVariables.set('token', r.data?.token || r.token || '');","  pm.collectionVariables.set('user_uuid', r.data?.user?.user_uuid || r.data?.user_uuid || '');","}"],"type":"text/javascript"}}]},
+            {"name":"Social Auth","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/social-auth","host":["{{base_url}}"],"path":["api","v1","user","social-auth"]},"body":{"mode":"raw","raw":"{\"provider\":\"google\",\"token\":\"GOOGLE_ACCESS_TOKEN\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Forgot Password","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/forgot-password","host":["{{base_url}}"],"path":["api","v1","user","forgot-password"]},"body":{"mode":"raw","raw":"{\"email\":\"john@example.com\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Resend OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/resend-otp","host":["{{base_url}}"],"path":["api","v1","user","resend-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"john@example.com\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Verify OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/verify-otp","host":["{{base_url}}"],"path":["api","v1","user","verify-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"john@example.com\",\"otp\":\"123456\",\"password\":\"newpassword\",\"password_confirmation\":\"newpassword\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Logout","request":{"auth":{"type":"bearer","bearer":[{"key":"token","value":"{{token}}","type":"string"}]},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/user/logout","host":["{{base_url}}"],"path":["api","v1","user","logout"]}}}
+          ]
+        },
+        {
+          "name": "Admin Auth",
+          "item": [
+            {"name":"Admin Login","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/admin/login","host":["{{base_url}}"],"path":["api","v1","admin","login"]},"body":{"mode":"raw","raw":"{\"email\":\"admin@tvaofficial.com\",\"password\":\"password\"}","options":{"raw":{"language":"json"}}}},"event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) {","  var r = pm.response.json();","  pm.collectionVariables.set('admin_token', r.data?.token || r.token || '');","}"],"type":"text/javascript"}}]},
+            {"name":"Admin Forgot Password","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/admin/forgot-password","host":["{{base_url}}"],"path":["api","v1","admin","forgot-password"]},"body":{"mode":"raw","raw":"{\"email\":\"admin@tvaofficial.com\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Admin Resend OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/admin/resend-otp","host":["{{base_url}}"],"path":["api","v1","admin","resend-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"admin@tvaofficial.com\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Admin Verify OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/admin/verify-otp","host":["{{base_url}}"],"path":["api","v1","admin","verify-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"admin@tvaofficial.com\",\"otp\":\"123456\",\"password\":\"newpassword\",\"password_confirmation\":\"newpassword\"}","options":{"raw":{"language":"json"}}}}}
+          ]
+        },
+        {
+          "name": "Merchant Auth",
+          "item": [
+            {"name":"Merchant Login","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/merchant/login","host":["{{base_url}}"],"path":["api","v1","merchant","login"]},"body":{"mode":"raw","raw":"{\"email\":\"lawyer@example.com\",\"password\":\"password\"}","options":{"raw":{"language":"json"}}}},"event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) {","  var r = pm.response.json();","  pm.collectionVariables.set('merchant_token', r.data?.token || r.token || '');","}"],"type":"text/javascript"}}]},
+            {"name":"Merchant Forgot Password","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/merchant/forgot-password","host":["{{base_url}}"],"path":["api","v1","merchant","forgot-password"]},"body":{"mode":"raw","raw":"{\"email\":\"lawyer@example.com\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Merchant Verify OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/merchant/verify-otp","host":["{{base_url}}"],"path":["api","v1","merchant","verify-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"lawyer@example.com\",\"otp\":\"123456\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Merchant Reset Password","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/merchant/reset-password","host":["{{base_url}}"],"path":["api","v1","merchant","reset-password"]},"body":{"mode":"raw","raw":"{\"email\":\"lawyer@example.com\",\"otp\":\"123456\",\"password\":\"newpassword\",\"password_confirmation\":\"newpassword\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Merchant Set Password","request":{"auth":{"type":"bearer","bearer":[{"key":"token","value":"{{merchant_token}}","type":"string"}]},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/merchant/set-password","host":["{{base_url}}"],"path":["api","v1","merchant","set-password"]},"body":{"mode":"raw","raw":"{\"password\":\"newpassword\",\"password_confirmation\":\"newpassword\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Merchant Change Password","request":{"auth":{"type":"bearer","bearer":[{"key":"token","value":"{{merchant_token}}","type":"string"}]},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/merchant/change-password","host":["{{base_url}}"],"path":["api","v1","merchant","change-password"]},"body":{"mode":"raw","raw":"{\"current_password\":\"oldpassword\",\"password\":\"newpassword\",\"password_confirmation\":\"newpassword\"}","options":{"raw":{"language":"json"}}}}}
+          ]
+        },
+        {
+          "name": "Affiliate Auth",
+          "item": [
+            {"name":"Affiliate Sign Up","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/affiliate/signup","host":["{{base_url}}"],"path":["api","v1","affiliate","signup"]},"body":{"mode":"raw","raw":"{\"name\":\"Jane Ref\",\"email\":\"jane@example.com\",\"password\":\"password\",\"referral_code\":\"TVA2025\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Affiliate Login","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/affiliate/login","host":["{{base_url}}"],"path":["api","v1","affiliate","login"]},"body":{"mode":"raw","raw":"{\"email\":\"jane@example.com\",\"password\":\"password\"}","options":{"raw":{"language":"json"}}}},"event":[{"listen":"test","script":{"exec":["if (pm.response.code === 200) {","  var r = pm.response.json();","  pm.collectionVariables.set('affiliate_token', r.data?.token || r.token || '');","}"],"type":"text/javascript"}}]},
+            {"name":"Affiliate Send OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/affiliate/send-otp","host":["{{base_url}}"],"path":["api","v1","affiliate","send-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"jane@example.com\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Affiliate Verify OTP","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/affiliate/verify-otp","host":["{{base_url}}"],"path":["api","v1","affiliate","verify-otp"]},"body":{"mode":"raw","raw":"{\"email\":\"jane@example.com\",\"otp\":\"123456\"}","options":{"raw":{"language":"json"}}}}},
+            {"name":"Affiliate Forgot Password","request":{"auth":{"type":"noauth"},"method":"POST","header":[],"url":{"raw":"{{base_url}}/api/v1/affiliate/forgot-password","host":["{{base_url}}"],"path":["api","v1","affiliate","forgot-password"]},"body":{"mode":"raw","raw":"{\"email\":\"jane@example.com\"}","options":{"raw":{"language":"json"}}}}}
+          ]
+        }
+      ]
+    },

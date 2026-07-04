@@ -16,6 +16,7 @@ import {
   type FunctionResponsePart,
 } from '@google/generative-ai';
 import { SocialMCPClient } from './lib/mcp-client.js';
+import { TvaMcpManager } from './lib/tva-client.js';
 import { TRAVEL_TOOLS, TRAVEL_TOOL_NAMES, executeTravelTool } from './tools/travel.js';
 import { createSession, loadHistory, saveHistory } from './lib/memory.js';
 
@@ -52,6 +53,25 @@ When you receive a message from a social platform (indicated in the prompt), use
 - **WhatsApp** → use SEND_WHATSAPP_MESSAGE with the recipient number provided
 
 Format your reply to suit the platform (shorter on Twitter, richer markdown on Telegram/Discord/Slack).
+
+## Booking Flights, Hotels, Visas & Immigration (TVA OTA)
+You also have tools to search and book real flights and hotels, and to track visa/immigration applications,
+through the TVA OTA platform. Hard rules for these tools:
+1. **Confirm before committing money.** Never call BOOK_FLIGHT, BOOK_HOTEL, CANCEL_FLIGHT_BOOKING,
+   CANCEL_HOTEL_BOOKING, CONFIRM_FLIGHT_PAYMENT, CONFIRM_HOTEL_PAYMENT, SELECT_FLIGHT_SEAT, CHANGE_PASSWORD, or
+   CLOSE_ACCOUNT with confirm: true until you have read the exact price, dates, and names back to the user in
+   this conversation and they have explicitly agreed. Never set confirm: true speculatively.
+2. **Never ask for a card number in chat.** BOOK_HOTEL currently requires raw card details from the underlying
+   API — do not prompt the user to type their card number here. Tell them this must be completed through a
+   secure checkout step, not in this conversation.
+3. **Flights**: always call CONFIRM_FLIGHT_PRICE on an offerRef immediately before BOOK_FLIGHT — fares can change
+   between search and booking. Use the offerRef returned by SEARCH_FLIGHTS; never invent or retype a flightOffer.
+4. **Login required for personal data.** Tools like LIST_MY_FLIGHT_BOOKINGS, GET_USER_PROFILE, or visa/immigration
+   booking-tracking tools need the user to be logged in first — if a tool reports it needs login, ask the user to
+   confirm they want to log in, then call LOGIN_USER with the credentials they provide (never invent credentials,
+   never repeat their password back to them).
+5. If a booking tool is unavailable (not connected), say so plainly and suggest the official TVA site instead of
+   guessing at flight/hotel details yourself.
 
 ## Tone
 Professional yet approachable. Knowledgeable and direct, giving real actionable advice.`;
@@ -97,10 +117,19 @@ export async function runAgent(
     throw new Error(`Failed to list social-mcp tools: ${(err as Error).message}`);
   }
 
-  // Combine social-mcp (reply tools) + local travel (search tools)
+  // ── TVA OTA connection (flight/hotel/visa/immigration/account booking tools) ──
+  const tvaClient = new TvaMcpManager(sessionId);
+  await tvaClient.connect();
+  const tvaGeminiTools = await tvaClient.listToolsAsGemini();
+  if (verbose) console.error(`[agent] tva-mcp tools: ${tvaGeminiTools.map((t) => t.name).join(', ') || '(none connected)'}`);
+
+  // Combine social-mcp (reply tools) + local travel (search tools) + TVA (booking tools)
   const allTools: FunctionDeclarationsTool[] = [
     { functionDeclarations: socialGeminiTools as FunctionDeclarationsTool['functionDeclarations'] },
     { functionDeclarations: TRAVEL_TOOLS      as FunctionDeclarationsTool['functionDeclarations'] },
+    ...(tvaGeminiTools.length > 0
+      ? [{ functionDeclarations: tvaGeminiTools as FunctionDeclarationsTool['functionDeclarations'] }]
+      : []),
   ];
 
   // ── Gemini client ──────────────────────────────────────────────────────────
@@ -166,6 +195,10 @@ export async function runAgent(
             // Platform reply via social-mcp
             const text = await socialClient.callTool(name, input);
             responseContent = { result: text };
+          } else if (tvaClient.hasTool(name)) {
+            // Flight/hotel/visa/immigration/account booking tool via TVA MCP
+            const text = await tvaClient.callTool(name, input);
+            responseContent = { result: text };
           } else {
             responseContent = { error: `Unknown tool: ${name}` };
           }
@@ -184,5 +217,6 @@ export async function runAgent(
     }
   } finally {
     await socialClient.disconnect();
+    await tvaClient.disconnect();
   }
 }

@@ -63,6 +63,16 @@ ENV SLACK_BOT_TOKEN=""
 ENV WHATSAPP_ACCESS_TOKEN=""
 ENV WHATSAPP_PHONE_NUMBER_ID=""
 
+# TVA OTA booking tools — mcps/* built output is mounted at /tva-mcp (see docker-compose.yml).
+# Set TVA_MCP_ENABLED=false to run NomadSage as a knowledge-base-only advisor.
+ENV TVA_MCP_ENABLED=true
+ENV TVA_BASE_URL=""
+ENV TVA_FLIGHT_MCP_PATH=/tva-mcp/flight-mcp/dist/index.js
+ENV TVA_HOTEL_MCP_PATH=/tva-mcp/hotel-mcp/dist/index.js
+ENV TVA_VISA_MCP_PATH=/tva-mcp/visa-mcp/dist/index.js
+ENV TVA_IMMIGRATION_MCP_PATH=/tva-mcp/immigration-mcp/dist/index.js
+ENV TVA_ACCOUNT_MCP_PATH=/tva-mcp/account-mcp/dist/index.js
+
 EXPOSE 3456
 
 ENTRYPOINT ["node", "dist/index.js"]

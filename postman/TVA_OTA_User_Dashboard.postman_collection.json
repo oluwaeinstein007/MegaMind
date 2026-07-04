@@ -1,0 +1,602 @@
+{
+  "info": {
+    "_postman_id": "tva-ota-user-dashboard-v1",
+    "name": "TVA OTA – User Dashboard API",
+    "description": "All client-facing endpoints for the TVA OTA user portal.\n\n**Base URL:** `{{base_url}}/api/v1`\n\n**Authentication:** All endpoints in this collection (except Auth) require a Bearer token.\nLogin via `POST /user/login` and set the response token in the `token` collection variable.\n\n---\n\n## Flow\n1. **Register / Login** → get `token`\n2. **Profile** → view/edit user info\n3. **Flight Bookings** → list, view detail, cancel, resend ticket\n4. **Hotel Bookings** → list, view detail\n5. **Visa** → bookings, updates, followup questions\n6. **Immigration** → bookings, updates, notifications\n7. **Notifications** → get all, mark as read",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",        "value": "http://localhost:8000", "type": "string" },
+    { "key": "token",           "value": "",                      "type": "string", "description": "Set after login" },
+    { "key": "user_uuid",       "value": "",                      "type": "string", "description": "Set after login – used for optional-auth booking lookups" },
+    { "key": "tvaId",           "value": "",                      "type": "string", "description": "TVA booking ID from flight book response" },
+    { "key": "cancelUuid",      "value": "",                      "type": "string", "description": "cancel_uuid from flight book response" },
+    { "key": "flightBookingId", "value": "",                      "type": "string", "description": "Local DB id of flight booking" },
+    { "key": "hotelBookingId",  "value": "",                      "type": "string", "description": "Local DB id of hotel booking" },
+    { "key": "visaBookingId",   "value": "",                      "type": "string", "description": "Local DB id of visa booking" },
+    { "key": "notificationId",  "value": "",                      "type": "string", "description": "Notification ID for mark-as-read" }
+  ],
+  "item": [
+
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"password\": \"Password123!\",\n  \"password_confirmation\": \"Password123!\",\n  \"phone_number\": \"+2348012345678\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/register",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","register"]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if (r.token) {",
+                "  pm.collectionVariables.set('token', r.token);",
+                "  pm.collectionVariables.set('user_uuid', r.data && r.data.user_uuid ? r.data.user_uuid : '');",
+                "  console.log('Logged in. UUID:', r.data && r.data.user_uuid);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john.doe@example.com\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/login",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","login"]
+            }
+          }
+        },
+        {
+          "name": "Forgot Password (Send OTP)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"john.doe@example.com\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/forgot-password",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","forgot-password"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"john.doe@example.com\",\n  \"otp\": \"123456\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/verify-otp",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "Resend OTP",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"john.doe@example.com\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/resend-otp",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","resend-otp"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/logout",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","logout"]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Profile",
+      "item": [
+        {
+          "name": "Get User (Dashboard)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user",
+              "host": ["{{base_url}}"], "path": ["api","v1","user"]
+            },
+            "description": "Returns full user object including roles, stats, and recent activity."
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/profile",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","profile"]
+            }
+          }
+        },
+        {
+          "name": "Edit Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"phone_number\": \"+2348012345678\",\n  \"date_of_birth\": \"1990-01-15\",\n  \"gender\": \"male\",\n  \"address\": \"123 Main St\",\n  \"passport_number\": \"A12345678\",\n  \"passport_expiry_date\": \"2030-01-10\",\n  \"passport_nationality\": \"NG\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/edit-profile",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","edit-profile"]
+            }
+          }
+        },
+        {
+          "name": "Upload Profile Picture",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "image", "type": "file", "src": "" }]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/profile-picture",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","profile-picture"]
+            }
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"OldPassword123!\",\n  \"password\": \"NewPassword123!\",\n  \"password_confirmation\": \"NewPassword123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/change-password",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","change-password"]
+            }
+          }
+        },
+        {
+          "name": "Check Discount / Promo Code",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/check-discount-promo?code=PROMO10",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","check-discount-promo"],
+              "query": [{ "key": "code", "value": "PROMO10" }]
+            }
+          }
+        },
+        {
+          "name": "Get Notifications",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/get-notification",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","get-notification"]
+            }
+          }
+        },
+        {
+          "name": "Close Account",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/user/close-account",
+              "host": ["{{base_url}}"], "path": ["api","v1","user","close-account"]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Flight Bookings",
+      "item": [
+        {
+          "name": "List My Flight Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings?per_page=15",
+              "host": ["{{base_url}}"], "path": ["api","v1","flights","bookings"],
+              "query": [
+                { "key": "per_page",    "value": "15" },
+                { "key": "user_uuid",   "value": "{{user_uuid}}", "disabled": true, "description": "Use instead of token for guest lookup" },
+                { "key": "status",      "value": "", "disabled": true, "description": "pending | confirmed | failed | cancelled" },
+                { "key": "origin",      "value": "", "disabled": true, "description": "IATA code e.g. LOS" },
+                { "key": "destination", "value": "", "disabled": true, "description": "IATA code e.g. LHR" },
+                { "key": "trip_type",   "value": "", "disabled": true, "description": "one-way | round-trip | multi-city" }
+              ]
+            },
+            "description": "Returns paginated list of the authenticated user's flight bookings.\n\nSupports filter query params: `status`, `origin`, `destination`, `trip_type`."
+          }
+        },
+        {
+          "name": "Get Flight Booking Detail (full itinerary)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings/{{flightBookingId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","flights","bookings","{{flightBookingId}}"],
+              "query": [
+                { "key": "user_uuid", "value": "{{user_uuid}}", "disabled": true, "description": "Use instead of token for guest lookup" }
+              ]
+            },
+            "description": "Returns booking with full `itinerary` block (segments, airline logos, cabin, baggage, departure/arrival times) and `pnr`."
+          }
+        },
+        {
+          "name": "Verify Booking by TVA ID (QR scan)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/verify/{{tvaId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","flights","verify","{{tvaId}}"]
+            },
+            "description": "Public — no auth needed. Looks up a booking by TVA ID for QR code scans or confirmation page display."
+          }
+        },
+        {
+          "name": "Cancel My Booking",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/cancel/{{cancelUuid}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","flights","cancel","{{cancelUuid}}"]
+            },
+            "description": "User-facing cancel using `cancel_uuid` from the booking response or receipt email manage link. No auth token needed — the UUID is the secret.\n\nCancels on Amadeus and marks the local record as `status=cancelled`. Sets `payment_status=refunded` if already paid, or `failed` if still pending."
+          }
+        },
+        {
+          "name": "Resend E-Ticket Email",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/resend-ticket/{{tvaId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","flights","resend-ticket","{{tvaId}}"]
+            },
+            "description": "Resends the flight receipt / e-ticket email to the traveler's email on record.\n\nUse when the traveler didn't receive the confirmation email after booking."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Hotel Bookings",
+      "item": [
+        {
+          "name": "List My Hotel Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/amadeus/bookings?per_page=15",
+              "host": ["{{base_url}}"], "path": ["api","v1","hotels","amadeus","bookings"],
+              "query": [
+                { "key": "per_page",  "value": "15" },
+                { "key": "user_uuid", "value": "{{user_uuid}}", "disabled": true, "description": "Use instead of token for guest lookup" },
+                { "key": "status",    "value": "", "disabled": true, "description": "pending | confirmed | failed | cancelled" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Hotel Booking Detail",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/amadeus/bookings/{{hotelBookingId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","hotels","amadeus","bookings","{{hotelBookingId}}"],
+              "query": [
+                { "key": "user_uuid", "value": "{{user_uuid}}", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Visa – Client",
+      "item": [
+        {
+          "name": "List My Visa Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/booking",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","booking"]
+            }
+          }
+        },
+        {
+          "name": "Get Visa Booking Detail",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/booking/{{visaBookingId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","booking","{{visaBookingId}}"]
+            }
+          }
+        },
+        {
+          "name": "Visa Booking Details (by application_uuid)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/booking/details",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","booking","details"]
+            }
+          }
+        },
+        {
+          "name": "Get Visa Booked Updates",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/updates",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","updates"]
+            }
+          }
+        },
+        {
+          "name": "Get Visa Updates by Booking ID",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/updates/booking-id/{{visaBookingId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","updates","booking-id","{{visaBookingId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Followup Questions",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/followup",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","followup"]
+            }
+          }
+        },
+        {
+          "name": "Answer Followup Question",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"answer\": \"My answer here\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/followup/answer/{{visaBookingId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","followup","answer","{{visaBookingId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Visa Notifications",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/notification",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","notification"]
+            }
+          }
+        },
+        {
+          "name": "Mark Visa Notification as Read",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/notification/{{notificationId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","notification","{{notificationId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Visa Transactions",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/transaction",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","transaction"]
+            }
+          }
+        },
+        {
+          "name": "Get Visa Transaction Detail",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/visa/client/transaction/{{visaBookingId}}/detail",
+              "host": ["{{base_url}}"], "path": ["api","v1","visa","client","transaction","{{visaBookingId}}","detail"]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Immigration – Client",
+      "item": [
+        {
+          "name": "List My Immigration Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/booking",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","booking"]
+            }
+          }
+        },
+        {
+          "name": "Get Immigration Booking Detail",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/booking/{{notificationId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","booking","{{notificationId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Immigration Booked Updates",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/booked-updates",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","booked-updates"]
+            }
+          }
+        },
+        {
+          "name": "Get Immigration Updates by Booking ID",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/booked-updates/booking/{{notificationId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","booked-updates","booking","{{notificationId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Immigration Notifications",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/notification",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","notification"]
+            }
+          }
+        },
+        {
+          "name": "Mark Immigration Notification as Read",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/notification/{{notificationId}}",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","notification","{{notificationId}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Immigration Transactions",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/transaction",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","transaction"]
+            }
+          }
+        },
+        {
+          "name": "Get Immigration Transaction Detail",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/immigration/client/transaction/{{notificationId}}/detail",
+              "host": ["{{base_url}}"], "path": ["api","v1","immigration","client","transaction","{{notificationId}}","detail"]
+            }
+          }
+        }
+      ]
+    }
+
+  ]
+}

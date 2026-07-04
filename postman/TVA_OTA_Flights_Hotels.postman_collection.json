@@ -1,0 +1,1088 @@
+
+{
+  "info": {
+    "_postman_id": "tva-ota-flights-hotels-v2",
+    "name": "TVA OTA – Flights & Hotels API",
+    "description": "Complete API reference for TVA OTA flight and hotel endpoints.\n\n**Base URL:** `{{base_url}}/api/v1`\n\n**Authentication:**\n- Endpoints marked `[AUTH]` require a Bearer token (admin routes). Login and set `token` or `admin_token` in collection variables.\n- Flight and hotel **booking endpoints are optional-auth** — no token needed for guests. Include a Bearer token to link the booking to a registered user's `user_uuid`; otherwise the backend auto-links by email (or stores null if no account exists).\n\n---\n\n## TVA Pricing Breakdown\nEvery search, price-confirm, upsell, and predict response includes a `price.tva` block:\n\n| Field | Description |\n|---|---|\n| `vendorPrice` | Raw Amadeus price |\n| `commission` | TVA markup (5% default) |\n| `sc` | Service charge (NGN 1000 converted) |\n| `vat` | VAT 7.5% of (commission + sc) |\n| `wt` | Withholding tax 5% of (commission + sc) |\n| `ppc` | Payment processing charge |\n| `totalTVA` | **Total to charge the client (flight + seat add-ons)** |\n| `gain` | TVA net profit |\n| `seat_charges` | Total paid for seat add-ons (separate Paystack txns, reflected in `totalTVA`) |\n\n---\n\n## Airline Logo\nThe backend automatically injects `airlineLogo` into every flight segment across **all** endpoints that return offer data (search, price, upsell, predict, order fetch):\n\n```\nitineraries[].segments[].airlineLogo  →  https://pics.avs.io/200/200/{IATA}.png\n```\n\nRender it directly in the UI — no frontend carrier-code mapping needed.\n\n---\n\n## Flight Booking Flow\n1. **Search** – POST `/flights/search` (one-way / round-trip / multi-city)\n2. *(Optional)* **Price Analysis** – GET `/flights/price-analysis` – cheap or expensive?\n3. *(Optional)* **Seatmap** – POST `/flights/seatmap` – cabin seat layout\n4. *(Optional)* **Upsell** – POST `/flights/upsell` – branded fare upgrades. Each offer returns `price.tva.seatIncluded` (true/false). **If the user picks a branded fare, save the chosen offer and call /price again with it before booking — do not skip the re-price step.**\n5. *(Optional)* **Predict** – POST `/flights/predict` – AI-ranked offers (each with logo)\n6. **Price** – POST `/flights/price` – confirm & lock price. If upsell was used, send the selected upsell offer here, not the original search offer.\n7. **Book** – POST `/flights/book` *(optional auth)* → triggers receipt email to traveler. If a Bearer token is provided the booking is linked to that user's `user_uuid`; otherwise the backend looks up the user by the primary traveler's `emailAddress` and links the uuid automatically (or stores null if no account exists).\n8. *(Optional, post-booking)* **Get Seat Price** – GET `/flights/bookings/{tva_id}/seat-price` – price of a specific seat\n9. *(Optional, post-booking)* **Select Seat** – POST `/flights/bookings/{tva_id}/select-seat` – assign seat; free seats need no payment, paid seats require a `paystack_reference`\n\n## Hotel Booking Flow\n1. **Search** – GET `/hotels/amadeus/search` → each hotel includes `guestRating.starRating` (Amadeus star rating 1–5); `score/count/label` are null (Amadeus does not expose review data)\n2. **Availability** – GET `/hotels/amadeus/availability/{offerId}`\n3. **Book** – POST `/hotels/amadeus/book` *(optional auth)* → confirmation email sent on success; response includes `cancelUUID`\n4. **Confirm Payment** – POST `/hotels/bookings/{tvaId}/confirm-payment` – mark Paystack payment confirmed\n5. *(Optional)* **Cancel** – DELETE `/hotels/bookings/{cancelUUID}/cancel` *(optional auth)* → marks booking cancelled in TVA DB. Note: Amadeus Hotel API has no self-service cancel endpoint — hotel cancellation with the property must be handled offline.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",         "value": "http://localhost:8000", "type": "string" },
+    { "key": "token",            "value": "",                      "type": "string", "description": "User Bearer token from /user/login" },
+    { "key": "admin_token",      "value": "",                      "type": "string", "description": "Admin Bearer token from /admin/login" },
+    { "key": "tvaId",            "value": "",                      "type": "string", "description": "TVA booking ID – set by Book Flight test script" },
+    { "key": "cancelUuid",       "value": "",                      "type": "string", "description": "cancel_uuid from booking response – for user-facing cancel" },
+    { "key": "flightBookingId",  "value": "",                      "type": "string", "description": "Local DB id – set by Book Flight test script" },
+    { "key": "amadeusOrderId",   "value": "",                      "type": "string", "description": "Amadeus order ID – set by Book Flight test script" },
+    { "key": "selectedUpsellOffer", "value": "",                   "type": "string", "description": "Upsell offer chosen by user – set by Branded Fares Upsell test script; pass to /price" },
+    { "key": "seatIncluded",    "value": "false",                  "type": "string", "description": "true when the chosen branded fare includes seat selection – set by Branded Fares Upsell test script" },
+    { "key": "hotelOfferId",    "value": "",                       "type": "string", "description": "Hotel offer ID – set by Search Hotels or Check Availability test script" },
+    { "key": "hotelBookingId",  "value": "",                       "type": "string", "description": "Local DB id of hotel booking – set by Book Hotel test script" },
+    { "key": "hotelTvaId",      "value": "",                       "type": "string", "description": "TVA booking ID for hotel – set by Book Hotel test script" },
+    { "key": "hotelCancelUUID", "value": "",                       "type": "string", "description": "cancelUUID from hotel booking response – used for user-facing cancel" }
+  ],
+  "item": [
+
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "User Login",
+          "event": [{ "listen": "test", "script": { "exec": ["var r = pm.response.json(); if(r.token) pm.collectionVariables.set('token', r.token);"], "type": "text/javascript" } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/user/login", "host": ["{{base_url}}"], "path": ["api","v1","user","login"] },
+            "description": "Login as a regular user. The test script automatically sets the `token` variable."
+          }
+        },
+        {
+          "name": "Admin Login",
+          "event": [{ "listen": "test", "script": { "exec": ["var r = pm.response.json(); if(r.token) pm.collectionVariables.set('admin_token', r.token);"], "type": "text/javascript" } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"admin@tva.com\",\n  \"password\": \"adminpassword\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/login", "host": ["{{base_url}}"], "path": ["api","v1","admin","login"] },
+            "description": "Login as admin. The test script automatically sets the `admin_token` variable."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Flights – Popular Routes",
+      "description": "Hybrid endpoint — serves TVA platform analytics when there is enough data, falls back to Amadeus Most Booked Destinations during cold-start.\n\nThe response always includes a `source` field:\n- `\"internal\"` → ranked by TVA platform search + booking data\n- `\"amadeus\"` → ranked by Amadeus industry booking data (fallback)\n\nThis is the **single endpoint the frontend should call** to render a 'Popular Destinations' or 'Trending Routes' section.",
+      "item": [
+        {
+          "name": "Popular Routes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/popular-routes?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","popular-routes"],
+              "query": [
+                { "key": "limit",  "value": "10",  "description": "Number of routes to return, 1–20 (default 10)" },
+                { "key": "origin", "value": "LOS", "description": "Filter by origin IATA airport code (optional)", "disabled": true }
+              ]
+            },
+            "description": "Returns popular flight routes.\n\n**Response fields per route:**\n- `origin` – IATA airport code\n- `destination` – IATA airport code\n- `search_count` – searches on TVA this month (null when source is amadeus)\n- `booking_count` – bookings on TVA this month (null when source is amadeus)\n- `score` – computed popularity score\n\n**Score formula (internal source):**\n```\nscore = (search_count × 0.3) + (booking_count × 0.5) + (booking_rate × 0.2)\nbooking_rate = booking_count / search_count  (capped at 1.0)\n```\n\nRecomputed nightly at 02:00 via `flights:aggregate-route-stats`.\n\n**Cold-start fallback:** When TVA has fewer than 50 searches in the current month, the backend transparently falls back to Amadeus Most Booked Destinations data (previous month). The `source` field in the response tells you which data set was used."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Flights – Search & Shopping",
+      "item": [
+        {
+          "name": "1. Search Flights (POST – one-way / round-trip / multi-city)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.data && r.data.data.length > 0) {",
+                "  pm.collectionVariables.set('flightOffer', JSON.stringify(r.data.data[0]));",
+                "  pm.collectionVariables.set('flightSearchResponse', JSON.stringify(r.data));",
+                "  console.log('Offers found:', r.data.data.length, '| First TVA total:', r.data.data[0].price.tva.totalTVA);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currencyCode\": \"USD\",\n  \"originDestinations\": [\n    {\n      \"id\": \"1\",\n      \"originLocationCode\": \"BOS\",\n      \"destinationLocationCode\": \"MAD\",\n      \"departureDateTimeRange\": {\n        \"date\": \"2026-05-01\",\n        \"time\": \"10:00:00\"\n      }\n    },\n    {\n      \"id\": \"2\",\n      \"originLocationCode\": \"MAD\",\n      \"destinationLocationCode\": \"BOS\",\n      \"departureDateTimeRange\": {\n        \"date\": \"2026-05-15\",\n        \"time\": \"17:00:00\"\n      }\n    }\n  ],\n  \"travelers\": [\n    {\n      \"id\": \"1\",\n      \"travelerType\": \"ADULT\",\n      \"fareOptions\": [\"STANDARD\"]\n    },\n    {\n      \"id\": \"2\",\n      \"travelerType\": \"CHILD\",\n      \"fareOptions\": [\"STANDARD\"]\n    }\n  ],\n  \"sources\": [\"GDS\"],\n  \"searchCriteria\": {\n    \"maxFlightOffers\": 10,\n    \"flightFilters\": {\n      \"cabinRestrictions\": [\n        {\n          \"cabin\": \"BUSINESS\",\n          \"coverage\": \"MOST_SEGMENTS\",\n          \"originDestinationIds\": [\"1\"]\n        }\n      ],\n      \"carrierRestrictions\": {\n        \"excludedCarrierCodes\": [\"AA\", \"TP\", \"AZ\"]\n      }\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/search",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","search"]
+            },
+            "description": "Flight search endpoint. Handles **one-way, round-trip, and multi-city** via the Amadeus POST body format.\n\n**One-way** – single object in `originDestinations`\n**Round-trip** – two objects (outbound + return legs)\n**Multi-city** – three or more objects with different cities\n\nSupports:\n- Departure time ranges via `departureDateTimeRange.time`\n- Mixed cabin classes per leg via `cabinRestrictions`\n- Carrier exclusions/inclusions via `carrierRestrictions`\n- Traveler type mix: ADULT, CHILD, HELD_INFANT, SEATED_INFANT, STUDENT, SENIOR\n\n`fareOptions`: STANDARD, NEGOTIATED, CORPORATE\n`cabin`: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST\n`coverage`: MOST_SEGMENTS, AT_LEAST_ONE_SEGMENT, ALL_SEGMENTS\n\n**Response enrichments (added by TVA backend):**\n- `price.tva` – full TVA pricing breakdown (commission, sc, vat, wt, ppc, totalTVA, gain)\n- `itineraries[].segments[].airlineLogo` – airline logo image URL (e.g. `https://pics.avs.io/200/200/ET.png`). Display directly in the UI — no frontend mapping needed.\n\nThe test script saves the first offer to `{{flightOffer}}` and the full response to `{{flightSearchResponse}}` for downstream steps."
+          }
+        },
+        {
+          "name": "2. Flight Price Analysis (is this fare cheap?)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/price-analysis?originIataCode=MAD&destinationIataCode=CDG&departureDate=2026-05-01&currencyCode=USD&oneWay=false",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","price-analysis"],
+              "query": [
+                { "key": "originIataCode",      "value": "MAD",        "description": "Origin IATA (required)" },
+                { "key": "destinationIataCode", "value": "CDG",        "description": "Destination IATA (required)" },
+                { "key": "departureDate",        "value": "2026-05-01", "description": "YYYY-MM-DD (required)" },
+                { "key": "currencyCode",         "value": "USD" },
+                { "key": "oneWay",               "value": "false",     "description": "true for one-way, false for round-trip" }
+              ]
+            },
+            "description": "AI-powered price comparison. Returns historical price quartiles (min, Q1, median, Q3, max) so you can show clients whether the fare is CHEAP, AVERAGE, or EXPENSIVE relative to historical data.\n\nUse this **before** showing offers to add a 'Price Insight' badge to your UI."
+          }
+        },
+        {
+          "name": "3. Seatmap by Offer (pre-booking)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightOffer\": {{flightOffer}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/seatmap",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","seatmap"]
+            },
+            "description": "Get the cabin seatmap for a flight offer during the shopping phase (before booking).\n\nReturns seat-by-seat availability with:\n- Seat characteristics (window, aisle, exit row, extra legroom, bassinet)\n- Availability status (AVAILABLE, BLOCKED, OCCUPIED)\n- Pricing for paid seat selection\n\nUse `{{flightOffer}}` set by the search step, or paste the offer directly."
+          }
+        },
+        {
+          "name": "3b. Seatmap by Order ID (post-booking)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/seatmap?orderId=AMADEUS_ORDER_ID",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","seatmap"],
+              "query": [
+                { "key": "orderId", "value": "AMADEUS_ORDER_ID", "description": "Amadeus flight order ID (required)" }
+              ]
+            },
+            "description": "Get seatmap for an existing flight order (after booking). Pass the Amadeus order ID from the booking confirmation."
+          }
+        },
+        {
+          "name": "4. Branded Fares Upsell (show fare upgrades)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.data && r.data.data.length > 0) {",
+                "  // Simulate user picking the first (cheapest) upsell option.",
+                "  // In production the user selects one from the UI.",
+                "  var chosen = r.data.data[0];",
+                "  pm.collectionVariables.set('selectedUpsellOffer', JSON.stringify(chosen));",
+                "  var seatIncluded = chosen.price && chosen.price.tva && chosen.price.tva.seatIncluded === true;",
+                "  pm.collectionVariables.set('seatIncluded', seatIncluded ? 'true' : 'false');",
+                "  console.log('Upsell options:', r.data.data.length, '| Chosen TVA total:', chosen.price.tva.totalTVA, '| seatIncluded:', seatIncluded);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightOffer\": {{flightOffer}},\n  \"currency\": \"USD\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/upsell",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","upsell"]
+            },
+            "description": "Get branded fare alternatives (fare families) for a given offer.\n\nReturns upgraded fare options such as:\n- BASIC → STANDARD → FLEXIBLE → BUSINESS\n\nEach alternative includes:\n- Services included (checked bags, seat selection, meal, refundability, miles)\n- Updated price with TVA breakdown via `price.tva`\n- **`price.tva.seatIncluded`** – `true` when this fare already includes seat selection (frontend should skip the paid-seat step for standard seats; premium seats may still have a charge)\n- `airlineLogo` injected on every segment (`data[].itineraries[].segments[].airlineLogo`)\n\n**Important:** If the user picks a branded fare, pass the chosen offer to `/flights/price` (not the original search offer) before booking. The test script saves the first offer to `{{selectedUpsellOffer}}` and `{{seatIncluded}}`.\n\nOptional `payments` field for targeted fares based on card BIN:\n```json\n\"payments\": [{ \"brand\": \"VISA_IXARIS\", \"binNumber\": 123456, \"flightOfferIds\": [1] }]\n```"
+          }
+        },
+        {
+          "name": "5. Flight Choice Prediction (AI ranking)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{{flightSearchResponse}}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/predict",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","predict"]
+            },
+            "description": "AI-powered flight choice prediction. Takes the **full search response body** and returns the same offers augmented with a `choiceProbability` score per offer.\n\nUse `{{flightSearchResponse}}` set by the search step.\n\nHigher `choiceProbability` = more likely to be booked by travelers matching this profile. Use this to reorder your offer list and surface the most relevant options first.\n\n`airlineLogo` is injected on every segment in the response (`data[].itineraries[].segments[].airlineLogo`)."
+          }
+        },
+        {
+          "name": "6. Price / Confirm Offer",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.data && r.data.data.flightOffers && r.data.data.flightOffers.length > 0) {",
+                "  pm.collectionVariables.set('pricedOffer', JSON.stringify(r.data.data.flightOffers[0]));",
+                "  console.log('Confirmed price:', r.data.data.flightOffers[0].price.tva.totalTVA);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightOffer\": {{flightOffer}},\n  \"currency\": \"NGN\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/price",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","price"]
+            },
+            "description": "Confirm and lock the price before booking. This step:\n1. Re-validates the fare is still available\n2. Returns final price with per-traveler tax/fee breakdown\n3. Recalculates TVA charges on the confirmed price\n4. Injects `airlineLogo` on every segment (`data.flightOffers[0].itineraries[].segments[].airlineLogo`)\n\nThe test script saves the priced offer to `{{pricedOffer}}` for the book step.\n\nAlways call this immediately before booking — fares change in real time."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Flights – Market Insights",
+      "description": "Amadeus Market Insights endpoints — all optional-auth (no token required, but include Bearer to link requests to a user).\n\nUse these to power destination discovery, travel trend widgets, and smart search suggestions in the UI.",
+      "item": [
+        {
+          "name": "Most Traveled Destinations",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to link request to a user", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/insights/most-traveled?originCityCode=MAD&period=2025-01&max=10&sort=analytics.travelers.score",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","insights","most-traveled"],
+              "query": [
+                { "key": "originCityCode", "value": "MAD",                          "description": "IATA city code of the origin (required, 3 chars)" },
+                { "key": "period",         "value": "2025-01",                       "description": "YYYY-MM (month) or YYYY (full year) — required" },
+                { "key": "max",            "value": "10",                            "description": "Max results 1–10 (default 10)" },
+                { "key": "sort",           "value": "analytics.travelers.score",     "description": "analytics.travelers.score | analytics.flights.score" },
+                { "key": "page[limit]",    "value": "10",                            "description": "Results per page",          "disabled": true },
+                { "key": "page[offset]",   "value": "0",                             "description": "Pagination offset",         "disabled": true },
+                { "key": "fields",         "value": "",                              "description": "Comma-separated field filter", "disabled": true }
+              ]
+            },
+            "description": "Returns the **top destinations by passenger volume** departing from the given origin city and period.\n\nEach result includes:\n- `destination` – IATA city code\n- `analytics.travelers.score` – relative traveler volume score\n- `analytics.flights.score` – relative flight frequency score\n\nUse this to power 'Popular Destinations' carousels or trending destination widgets."
+          }
+        },
+        {
+          "name": "Most Booked Destinations",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to link request to a user", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/insights/most-booked?originCityCode=MAD&period=2025-01&max=10&sort=analytics.flights.score",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","insights","most-booked"],
+              "query": [
+                { "key": "originCityCode", "value": "MAD",                       "description": "IATA city code of the origin (required, 3 chars)" },
+                { "key": "period",         "value": "2025-01",                   "description": "YYYY-MM (month) or YYYY (full year) — required" },
+                { "key": "max",            "value": "10",                        "description": "Max results 1–10 (default 10)" },
+                { "key": "sort",           "value": "analytics.flights.score",   "description": "analytics.flights.score | analytics.travelers.score" },
+                { "key": "page[limit]",    "value": "10",                        "description": "Results per page",          "disabled": true },
+                { "key": "page[offset]",   "value": "0",                         "description": "Pagination offset",         "disabled": true },
+                { "key": "fields",         "value": "",                          "description": "Comma-separated field filter", "disabled": true }
+              ]
+            },
+            "description": "Returns the **top destinations by number of bookings** departing from the given origin city and period.\n\nSimilar to Most Traveled, but ranked by booking count rather than passenger volume — useful for showing what travelers are actively buying, not just searching.\n\nEach result includes:\n- `destination` – IATA city code\n- `analytics.flights.score` – relative booking volume score\n- `analytics.travelers.score` – relative traveler score"
+          }
+        },
+        {
+          "name": "Busiest Traveling Period",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to link request to a user", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/insights/busiest-period?cityCode=MAD&period=2025&direction=DEPARTING",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","insights","busiest-period"],
+              "query": [
+                { "key": "cityCode",   "value": "MAD",        "description": "IATA city code (required, 3 chars)" },
+                { "key": "period",     "value": "2025",        "description": "Full year YYYY only — required" },
+                { "key": "direction",  "value": "DEPARTING",   "description": "DEPARTING (default) | ARRIVING" }
+              ]
+            },
+            "description": "Returns the **busiest months** for a given city in a year, broken down by direction (departing or arriving flights).\n\nEach result includes:\n- `period` – month (YYYY-MM)\n- `analytics.travelers.score` – relative traffic score for that month\n\nUse this to show 'Best time to fly from X' or 'Peak travel months' on destination pages. Also useful for pricing context — busiest months typically have higher fares."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Flights – Booking",
+      "item": [
+        {
+          "name": "7. Book Flight",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.tva_id) {",
+                "  pm.collectionVariables.set('flightBookingId', r.data.tva_id);",
+                "  pm.collectionVariables.set('tvaId', r.data.tva_id);",
+                "  pm.collectionVariables.set('cancelUuid', r.data.cancel_uuid);",
+                "  pm.collectionVariables.set('amadeusOrderId', r.data.amadeus_order_id);",
+                "  console.log('Booked! TVA ID:', r.data.tva_id, '| cancelUUID:', r.data.cancel_uuid, '| Total:', r.data.total_tva, r.data.booking_currency);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to link booking to your account", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightOffer\": {{pricedOffer}},\n  \"currency\": \"NGN\",\n  \"travelers\": [\n    {\n      \"id\": \"1\",\n      \"dateOfBirth\": \"1990-06-15\",\n      \"name\": {\n        \"firstName\": \"JOHN\",\n        \"lastName\": \"DOE\"\n      },\n      \"gender\": \"MALE\",\n      \"contact\": {\n        \"emailAddress\": \"john.doe@example.com\",\n        \"phones\": [\n          {\n            \"deviceType\": \"MOBILE\",\n            \"countryCallingCode\": \"234\",\n            \"number\": \"8012345678\"\n          }\n        ]\n      },\n      \"documents\": [\n        {\n          \"documentType\": \"PASSPORT\",\n          \"birthPlace\": \"Lagos\",\n          \"issuanceLocation\": \"Lagos\",\n          \"issuanceDate\": \"2020-01-10\",\n          \"number\": \"A12345678\",\n          \"expiryDate\": \"2030-01-10\",\n          \"issuanceCountry\": \"NG\",\n          \"validityCountry\": \"NG\",\n          \"nationality\": \"NG\",\n          \"holder\": true\n        }\n      ]\n    }\n  ],\n  \"seats\": [\n    {\n      \"traveler_id\": \"1\",\n      \"segment_id\": \"1\",\n      \"seat_number\": \"15A\",\n      \"price\": 43118.00,\n      \"currency\": \"NGN\"\n    }\n  ],\n  \"ticketingAgreement\": {\n    \"option\": \"DELAY_TO_CANCEL\",\n    \"delay\": \"6D\"\n  },\n  \"remarks\": {\n    \"general\": [\n      {\n        \"subType\": \"GENERAL_MISCELLANEOUS\",\n        \"text\": \"BOOKING VIA TVA OTA PLATFORM\"\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/book",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","book"]
+            },
+            "description": "Create a flight booking. **No authentication required** — works for guests and logged-in users alike.\n\n**Auth behaviour:**\n- With Bearer token → booking is linked to the authenticated user's `user_uuid`\n- Without token → backend looks up the user by primary traveler `emailAddress` and links their `user_uuid` automatically (null if no account exists)\n\n**Required:**\n- `flightOffer` – priced offer from Step 6 (use `{{pricedOffer}}`)\n- `travelers[]` – traveler objects with name, contact, documents\n\n**Optional:**\n- `seats[]` – seat selections made during checkout (industry standard: collect before booking, charge in one payment)\n  - `traveler_id` – matches `travelers[].id`\n  - `segment_id` – from `itinerary[].segments[].segment_id` (returned by the seatmap)\n  - `seat_number` – e.g. `\"15A\"`\n  - `price` – from `GET /bookings/{tva_id}/seat-price` or seatmap response. Use `0` for free/included seats.\n  - `currency` – ISO 4217 (defaults to booking currency)\n  - Paid seat costs are summed into `seat_charges` and added to `total_tva` — **one Paystack payment covers everything**\n  - If `seatIncluded === true` from the upsell step, pass `price: 0` for the seat\n- `currency` – ISO 4217 (default USD)\n- `ticketingAgreement.option`: CONFIRM | DELAY_TO_CANCEL | DELAY_TO_QUEUE\n- `ticketingAgreement.delay`: e.g. `6D` (hold for 6 days)\n- `contacts` – agency contact info\n- `remarks` – general remarks\n\n**Response includes:**\n- `tva_id` – TVA internal booking reference\n- `amadeus_order_id` – for order management\n- `total_tva` – total to charge client (flight + seat add-ons)\n- `seat_charges` – seat portion of the total\n- `gain` – TVA net profit\n- Full pricing breakdown (commission, sc, vat, wt, ppc)\n- `seat_assignments` – stored immediately; visible in booking detail dashboard\n- `fare_details[]` – branded fare info extracted per segment at booking time: `segment_id`, `cabin`, `branded_fare` (e.g. `\"SEMIFLEX\"`), `branded_fare_label`, `amenities[]` (`type`, `description`, `included`). Empty/null if no upsell was selected.\n\n**Post-booking seat changes:** Use `POST /bookings/{tva_id}/select-seat` to change a seat after the initial booking (separate Paystack payment if the new seat is paid).\n\n**On success:** A flight receipt email is automatically queued and sent to the primary traveler's email."
+          }
+        },
+        {
+          "name": "List My Bookings",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – or pass user_uuid as a query param", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings?per_page=15",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","bookings"],
+              "query": [
+                { "key": "per_page",    "value": "15" },
+                { "key": "user_uuid",   "value": "", "disabled": true, "description": "Required if not sending a Bearer token" },
+                { "key": "status",      "value": "",  "disabled": true, "description": "pending | confirmed | failed | cancelled" },
+                { "key": "origin",      "value": "",  "disabled": true },
+                { "key": "destination", "value": "",  "disabled": true },
+                { "key": "trip_type",   "value": "",  "disabled": true, "description": "one-way | round-trip | multi-city" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get My Booking by ID (full itinerary)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – or pass user_uuid as a query param", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings/{{flightBookingId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","bookings","{{flightBookingId}}"],
+              "query": [
+                { "key": "user_uuid", "value": "", "disabled": true, "description": "Required if not sending a Bearer token" }
+              ]
+            },
+            "description": "Returns booking record with an additional `itinerary` block extracted from the stored Amadeus JSON.\n\nEach leg in `itinerary[].segments[]` includes:\n- `segment_id` – Amadeus segment ID (use this for `select-seat` calls)\n- `flight_number`, `airline_logo`\n- `departure` / `arrival` (iata, terminal, datetime)\n- `duration`\n- `cabin` – per-segment cabin class (correctly matched per leg, not just first segment)\n- `baggage` – `includedCheckedBags` per segment\n- `branded_fare` – fare family code chosen at booking, e.g. `\"SEMIFLEX\"` (null if no upsell was selected)\n- `branded_fare_label` – human-readable label, e.g. `\"Semi Flexible\"` (null if no upsell)\n- `amenities[]` – what's included in the branded fare, each entry has `{ type, description, included }`. `type` values: `BAGGAGE`, `MEAL`, `PRE_RESERVED_SEAT`, `ENTERTAINMENT`, `LOUNGE`, `OTHER`. `included: true` = no extra charge. Empty array if no branded fare was selected.\n- `passengers[]` – per-traveler seat info:\n  - `traveler_id`, `name`\n  - `seat_number` – selected seat (e.g. `\"15A\"`), or `null` if not yet selected (show \"Assigned at check-in\")\n\nAlso returns `pnr` (Amadeus PNR reference) and `seat_charges` (total paid for seat add-ons)."
+          }
+        },
+        {
+          "name": "Verify Booking (QR scan)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/verify/{{tvaId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","verify","{{tvaId}}"]
+            },
+            "description": "Public endpoint — no auth required.\n\nLookup a booking by its TVA ID. Used by QR code scans at airport desks or on the portal confirmation page.\n\nReturns the same full itinerary payload as `Get My Booking by ID` including `pnr`, segments, cabin, and baggage."
+          }
+        },
+        {
+          "name": "Cancel My Booking",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/cancel/{{cancelUuid}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","cancel","{{cancelUuid}}"]
+            },
+            "description": "User-facing cancellation endpoint — no auth token required.\n\nThe `cancel_uuid` acts as a one-time secret (sent in the receipt email manage link). Cancels the booking on Amadeus and marks the local record as `cancelled`.\n\n**cancel_uuid** is available in the booking response as `cancel_uuid`, and embedded in the receipt email manage link."
+          }
+        },
+        {
+          "name": "8. Get Seat Price (pre-selection)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – or pass user_uuid as query param", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings/{{tvaId}}/seat-price?seat_number=15A&segment_index=0",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","bookings","{{tvaId}}","seat-price"],
+              "query": [
+                { "key": "seat_number",    "value": "15A", "description": "Seat number to price (required)" },
+                { "key": "segment_index",  "value": "0",   "description": "0-based segment index (default 0)" },
+                { "key": "user_uuid",      "value": "",    "description": "Required if not sending a Bearer token", "disabled": true }
+              ]
+            },
+            "description": "Check the price of a specific seat for a confirmed booking before committing to it.\n\nFetches the live seatmap via Amadeus and returns pricing for the requested seat.\n\n**Response:**\n```json\n{\n  \"seat_number\": \"15A\",\n  \"free\": false,\n  \"price\": 43118.00,\n  \"currency\": \"NGN\"\n}\n```\n\n- `free: true` + `price: 0` → call Select Seat with no `paystack_reference`\n- `free: false` → collect Paystack payment first, then call Select Seat with the reference\n\n**Note:** If the user chose a branded fare where `price.tva.seatIncluded === true`, standard seats will return `free: true` here automatically."
+          }
+        },
+        {
+          "name": "9. Select Seat (free)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – or pass user_uuid in body", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"traveler_id\": \"1\",\n  \"segment_id\": \"1\",\n  \"seat_number\": \"15A\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings/{{tvaId}}/select-seat",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","bookings","{{tvaId}}","select-seat"]
+            },
+            "description": "Assign a free seat to a traveler on a confirmed booking.\n\nUse when `getSeatPrice` returns `free: true`. No `paystack_reference` needed.\n\n**Body fields:**\n- `traveler_id` – traveler ID from the booking (e.g. `\"1\"`, `\"2\"`)\n- `segment_id` – segment ID from the itinerary (e.g. `\"1\"`)\n- `seat_number` – seat to assign (e.g. `\"15A\"`)\n- `user_uuid` *(optional)* – required for guest flows without a Bearer token\n\nRepeating this call for the same `traveler_id` + `segment_id` replaces the previous assignment. The booking's `seat_charges` and `total_tva` are automatically reconciled."
+          }
+        },
+        {
+          "name": "9b. Select Seat (paid)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – or pass user_uuid in body", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"traveler_id\": \"1\",\n  \"segment_id\": \"1\",\n  \"seat_number\": \"4A\",\n  \"paystack_reference\": \"pstk_abc123xyz\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings/{{tvaId}}/select-seat",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","bookings","{{tvaId}}","select-seat"]
+            },
+            "description": "Assign a paid seat to a traveler on a confirmed booking.\n\nUse when `getSeatPrice` returns `free: false`. Collect payment via Paystack first, then pass the reference here.\n\n**Body fields:**\n- `traveler_id` – traveler ID from the booking\n- `segment_id` – segment ID from the itinerary\n- `seat_number` – seat to assign\n- `paystack_reference` – Paystack transaction reference for the seat payment (**required** for paid seats)\n- `user_uuid` *(optional)* – required for guest flows without a Bearer token\n\n**After a paid seat is saved:**\n- `seat_charges` on the booking record is updated to the running total of all paid seat add-ons\n- `total_tva` is updated to `flight charges + seat_charges`\n\nReturns `402 Payment Required` if called without a `paystack_reference` on a seat that has a price."
+          }
+        },
+        {
+          "name": "Resend E-Ticket",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/resend-ticket/{{tvaId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","resend-ticket","{{tvaId}}"]
+            },
+            "description": "Resends the flight receipt / e-ticket email to the primary traveler's email address on record.\n\nUse this when the traveler reports not receiving the confirmation email after booking. The email contains: full itinerary, passenger details, PNR, fare breakdown, QR code, and manage/cancel link."
+          }
+        },
+        {
+          "name": "Download E-Ticket PDF",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/ticket/{{tvaId}}/download",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","ticket","{{tvaId}}","download"]
+            },
+            "description": "Download the flight e-ticket as a PDF file.\n\nReturns a real PDF with correct `Content-Disposition: attachment` headers so the browser downloads or opens it in the built-in PDF viewer.\n\n**Filename:** `ticket-{tva_id}.pdf`\n\nUse `{{tvaId}}` set by the Book Flight test script, or paste the TVA booking ID directly."
+          }
+        },
+        {
+          "name": "Confirm Flight Payment",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to verify ownership", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paystack_reference\": \"PSK_REF_XXXXXXXXXX\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/flights/bookings/{{tvaId}}/confirm-payment",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","flights","bookings","{{tvaId}}","confirm-payment"]
+            },
+            "description": "Mark a flight booking's payment as confirmed after a successful Paystack transaction.\n\n**Required body:**\n- `paystack_reference` – Paystack transaction reference from the payment callback\n\n**Business rules:**\n- Can only be called once — returns 422 if payment is already processed\n- With Bearer token → verifies the booking belongs to the authenticated user; returns 403 if not\n- Without token → any caller with the `tva_id` can confirm (use with caution in guest flows)\n\nUpdates `payment_status` to `confirmed` and stores the Paystack reference on the booking record."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Flights – Admin",
+      "description": "All routes require `admin_token` (staff or superadmin role).\n\nBooking identifier: use the `tva_id` string (e.g. `TVA-XXXXXXXX`) as `{id}` in all booking sub-routes.\n\n**New in v3:** payment-status, refund, revenue-chart, top-routes, upcoming-departures endpoints.",
+      "item": [
+        {
+          "name": "List All Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings?per_page=15",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings"],
+              "query": [
+                { "key": "per_page",       "value": "15",  "description": "Results per page (default 15)" },
+                { "key": "status",         "value": "",    "disabled": true, "description": "pending | confirmed | failed | cancelled" },
+                { "key": "payment_status", "value": "",    "disabled": true, "description": "pending | paid | failed | cancelled | refunded" },
+                { "key": "email",          "value": "",    "disabled": true, "description": "Partial match on traveler email" },
+                { "key": "name",           "value": "",    "disabled": true, "description": "Partial match on first_name OR last_name" },
+                { "key": "origin",         "value": "",    "disabled": true, "description": "IATA departure code e.g. LOS" },
+                { "key": "destination",    "value": "",    "disabled": true, "description": "IATA arrival code e.g. LHR" },
+                { "key": "trip_type",      "value": "",    "disabled": true, "description": "one-way | round-trip" },
+                { "key": "currency",       "value": "",    "disabled": true, "description": "ISO 4217 e.g. NGN, USD" },
+                { "key": "from_date",      "value": "",    "disabled": true, "description": "Booking created on or after YYYY-MM-DD" },
+                { "key": "to_date",        "value": "",    "disabled": true, "description": "Booking created on or before YYYY-MM-DD" },
+                { "key": "departure_from", "value": "",    "disabled": true, "description": "Departure date on or after YYYY-MM-DD" },
+                { "key": "departure_to",   "value": "",    "disabled": true, "description": "Departure date on or before YYYY-MM-DD" }
+              ]
+            },
+            "description": "Paginated list of all flight bookings with flexible filters.\n\n**Filter combinations:**\n- Find all pending unpaid bookings: `status=pending&payment_status=pending`\n- Find all bookings for a route: `origin=LOS&destination=LHR`\n- Find upcoming round-trips: `trip_type=round-trip&departure_from=2026-04-01`\n- Find bookings by passenger name: `name=John`"
+          }
+        },
+        {
+          "name": "Get Booking (Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings/{{tvaId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings","{{tvaId}}"]
+            },
+            "description": "Retrieve a single flight booking by its TVA ID (e.g. `TVA-XXXXXXXX`).\n\nResponse includes the full booking record plus linked user info (`id`, `user_uuid`, `first_name`, `last_name`, `email`, `phone`)."
+          }
+        },
+        {
+          "name": "Update Booking Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"confirmed\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings/{{tvaId}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings","{{tvaId}}","status"]
+            },
+            "description": "Manually override the booking status.\n\n**Allowed values:** `pending` | `confirmed` | `failed` | `cancelled`\n\nUse this for support overrides or manual reconciliation. For refunds, use the dedicated `/refund` endpoint instead."
+          }
+        },
+        {
+          "name": "Update Payment Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"payment_status\": \"paid\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings/{{tvaId}}/payment-status",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings","{{tvaId}}","payment-status"]
+            },
+            "description": "Manually update the payment status independently of the booking status.\n\n**Allowed values:** `pending` | `paid` | `failed` | `cancelled` | `refunded`\n\nUseful for manual reconciliation when Paystack webhooks are missed or delayed."
+          }
+        },
+        {
+          "name": "Refund Booking",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings/{{tvaId}}/refund",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings","{{tvaId}}","refund"]
+            },
+            "description": "Mark a booking as refunded in one atomic operation.\n\n**Effect:** Sets `status → cancelled` and `payment_status → refunded` simultaneously.\n\n**Returns 422** if the booking has already been refunded.\n\nNote: This only records the refund in the TVA database. The actual payment reversal (e.g. via Paystack or manual bank transfer) must be completed separately."
+          }
+        },
+        {
+          "name": "Fetch Live Amadeus Order",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings/{{tvaId}}/amadeus",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings","{{tvaId}}","amadeus"]
+            },
+            "description": "Fetch the live order state directly from the Amadeus API. Use this to check current ticketing status, PNR, and segment details in real time.\n\n**Returns 422** if the booking has no `amadeus_order_id` on record.\n\n`airlineLogo` is injected on every segment (`data.flightOffers[].itineraries[].segments[].airlineLogo`)."
+          }
+        },
+        {
+          "name": "Cancel Booking (Amadeus + local)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/bookings/{{tvaId}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","bookings","{{tvaId}}","cancel"]
+            },
+            "description": "Cancel the flight order in Amadeus and mark the local record as `cancelled`.\n\n**Flow:**\n1. Calls Amadeus `DELETE /v1/booking/flight-orders/{id}` (if `amadeus_order_id` exists)\n2. If Amadeus returns an error → propagates the error, local record is NOT changed\n3. On success (or if no Amadeus order ID) → sets local `status = cancelled`\n\n**Returns 422** if already cancelled."
+          }
+        },
+        {
+          "name": "Flight Stats (KPIs)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","stats"]
+            },
+            "description": "Comprehensive KPI dashboard data for flight bookings.\n\n**Response fields:**\n\n| Field | Description |\n|---|---|\n| `total` | All-time booking count |\n| `pending` | Bookings awaiting confirmation |\n| `confirmed` | Successfully confirmed bookings |\n| `cancelled` | Cancelled bookings |\n| `failed` | Failed booking attempts |\n| `payment_breakdown` | Count per payment_status value |\n| `total_revenue` | All-time confirmed revenue (totalTVA) |\n| `total_gain` | All-time TVA net profit |\n| `total_vendor_cost` | All-time raw Amadeus cost |\n| `revenue_this_month` | Confirmed revenue this calendar month |\n| `revenue_last_month` | Confirmed revenue last calendar month |\n| `revenue_this_year` | Confirmed revenue this calendar year |\n| `avg_booking_value` | Average totalTVA per confirmed booking |\n| `by_trip_type` | Confirmed bookings split by one-way/round-trip |\n| `by_currency` | Revenue and count per booking currency |"
+          }
+        },
+        {
+          "name": "Revenue Chart (Last 12 Months)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/revenue-chart",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","revenue-chart"]
+            },
+            "description": "Monthly revenue breakdown for the past 12 months. Designed for charting on the admin dashboard.\n\n**Response:** Array of objects sorted oldest → newest:\n```json\n[\n  { \"month\": \"2025-05\", \"bookings\": 12, \"revenue\": 450000.00, \"gain\": 18500.00 },\n  ...\n]\n```\n\nMonths with zero confirmed bookings are omitted from the response."
+          }
+        },
+        {
+          "name": "Top Routes",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/top-routes?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","top-routes"],
+              "query": [
+                { "key": "limit", "value": "10", "description": "Number of routes to return (default 10, max 50)" }
+              ]
+            },
+            "description": "Most booked origin–destination pairs on the TVA platform, ranked by volume.\n\n**Response per route:**\n```json\n{\n  \"origin\": \"LOS\",\n  \"destination\": \"LHR\",\n  \"total_bookings\": 87,\n  \"total_revenue\": 3450000.00,\n  \"total_gain\": 142300.00\n}\n```\n\nOnly confirmed bookings are counted. Useful for commercial decisions — e.g. prioritising routes for promotions or capacity planning."
+          }
+        },
+        {
+          "name": "Upcoming Departures",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/flights/upcoming-departures?days=7&per_page=15",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","flights","upcoming-departures"],
+              "query": [
+                { "key": "days",     "value": "7",  "description": "Look-ahead window in days (default 7, max 90)" },
+                { "key": "per_page", "value": "15", "description": "Results per page (default 15)" }
+              ]
+            },
+            "description": "Paginated list of confirmed/pending bookings with departures in the next N days, sorted by departure date ascending.\n\nUse this for:\n- Pre-departure checks and follow-ups\n- Identifying bookings that need immediate attention\n- Operational dashboards showing today's/this week's flights\n\nIncludes linked user info (`user_uuid`, `first_name`, `last_name`, `email`)."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Hotels – Search & Availability",
+      "item": [
+        {
+          "name": "1. Search Hotels (all-in-one pipeline)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.hotels && r.data.hotels.length > 0) {",
+                "  var firstRoom = r.data.hotels[0].rooms[0];",
+                "  pm.collectionVariables.set('hotelOfferId', firstRoom.id);",
+                "  console.log('First offer ID:', firstRoom.id, '| TVA total:', firstRoom.price.totalTVA);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/amadeus/search?iata=LON&checkIn=2026-05-01&checkOut=2026-05-05&guests=2&bookingCurrency=NGN",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","amadeus","search"],
+              "query": [
+                { "key": "iata",            "value": "LON",        "description": "IATA city code (required)" },
+                { "key": "checkIn",         "value": "2026-05-01", "description": "YYYY-MM-DD (required)" },
+                { "key": "checkOut",        "value": "2026-05-05", "description": "YYYY-MM-DD (required)" },
+                { "key": "guests",          "value": "2",          "description": "Number of adult guests (optional, default 1)" },
+                { "key": "bookingCurrency", "value": "NGN",        "description": "ISO 4217 (required)" },
+                { "key": "ratings",         "value": "",           "description": "Optional. Comma-separated star ratings to filter by, e.g. 3,4,5. Valid values: 1,2,3,4,5", "disabled": true },
+                { "key": "amenities",       "value": "",           "description": "Optional. Comma-separated amenity codes, e.g. SWIMMING_POOL,SPA,FITNESS_CENTER,WIFI,RESTAURANT,PARKING,AIR_CONDITIONING,BUSINESS_CENTER,PETS_ALLOWED", "disabled": true }
+              ]
+            },
+            "description": "Full hotel search pipeline in a single call:\n1. Resolves city IATA → hotel IDs (up to 30)\n2. Searches offers for each hotel\n3. Checks availability\n4. Attaches TVA pricing breakdown to each room\n5. Adds hotel photo and AI description\n6. Attaches `guestRating` object\n\n**Optional filters (passed to Amadeus city search):**\n- `ratings` – comma-separated star ratings, e.g. `3,4,5`\n- `amenities` – comma-separated amenity codes, e.g. `SWIMMING_POOL,SPA,FITNESS_CENTER`\n\n**Each hotel in the response includes:**\n- `images[]` – hotel photo URL (enriched by PhotoService)\n- `description` – AI-generated hotel description\n- `guestRating.starRating` – Amadeus star rating (1–5, may be null)\n- `guestRating.score` – always null (Amadeus does not expose review scores)\n- `guestRating.count` – always null\n- `guestRating.label` – always null → show a placeholder in UI\n- `rating`, `amenities` – raw Amadeus fields (when returned)\n\n**Each room offer includes:**\n- `price.vendorPrice` – raw Amadeus price\n- `price.totalTVA` – total to charge client\n- `price.commission`, `price.sc`, `price.vat`, `price.wt`, `price.ppc`, `price.gain`"
+          }
+        },
+        {
+          "name": "1b. City Search (raw hotel IDs)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/amadeus/cities?cityCode=LON&checkInDate=2026-05-01&checkOutDate=2026-05-05",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","amadeus","cities"],
+              "query": [
+                { "key": "cityCode",     "value": "LON" },
+                { "key": "checkInDate",  "value": "2026-05-01" },
+                { "key": "checkOutDate", "value": "2026-05-05" }
+              ]
+            },
+            "description": "Get raw hotel IDs for a city. Use these `hotelId` values to call the hotel search step manually."
+          }
+        },
+        {
+          "name": "2. Check Availability",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.data) {",
+                "  pm.collectionVariables.set('hotelOfferId', r.data.data.offers[0].id);",
+                "  console.log('Offer available, ID:', r.data.data.offers[0].id);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/amadeus/availability/{{hotelOfferId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","amadeus","availability","{{hotelOfferId}}"]
+            },
+            "description": "Verify a specific offer is still available before booking. Also caches hotel info for the booking step."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Hotels – Booking",
+      "item": [
+        {
+          "name": "3. Book Hotel",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "var r = pm.response.json();",
+                "if(r.data && r.data.tvaId) {",
+                "  pm.collectionVariables.set('hotelBookingId', r.data.id);",
+                "  pm.collectionVariables.set('hotelTvaId', r.data.tvaId);",
+                "  pm.collectionVariables.set('hotelCancelUUID', r.data.cancelUUID);",
+                "  console.log('Hotel booked! TVA ID:', r.data.tvaId, '| cancelUUID:', r.data.cancelUUID, '| Total:', r.data.totalTVA, r.data.bookingCurrency);",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to link booking to your account", "disabled": true }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"offerId\": \"{{hotelOfferId}}\",\n  \"bookingCurrency\": \"NGN\",\n  \"vendorPrice\": 250.00,\n  \"guests\": [\n    {\n      \"tid\": 1,\n      \"title\": \"MR\",\n      \"name\": {\n        \"firstName\": \"JOHN\",\n        \"lastName\": \"DOE\"\n      },\n      \"contact\": {\n        \"phone\": \"+2348012345678\",\n        \"email\": \"john.doe@example.com\"\n      }\n    }\n  ],\n  \"payments\": [\n    {\n      \"id\": 1,\n      \"method\": \"creditCard\",\n      \"card\": {\n        \"vendorCode\": \"VI\",\n        \"cardNumber\": \"4111111111111111\",\n        \"expiryDate\": \"2027-01\"\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/amadeus/book",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","amadeus","book"]
+            },
+            "description": "Book a hotel offer. **No authentication required** — works for guests and logged-in users alike.\n\n**Auth behaviour:**\n- With Bearer token → booking is linked to the authenticated user's `user_uuid`\n- Without token → backend looks up the user by the first guest's `contact.email` and links their `user_uuid` automatically (null if no account exists)\n\n**Required:**\n- `offerId` – from availability check\n- `bookingCurrency` – ISO 4217 (e.g. NGN, USD)\n- `vendorPrice` – raw Amadeus price used for TVA markup calculation\n- `guests[]` – guest objects with `tid`, `title`, `name` (firstName/lastName), `contact` (phone/email)\n- `payments[]` – payment method object\n\n**Optional:**\n- `rooms[]` – room assignment details\n\n**Response includes:**\n- `tvaId` – TVA internal booking reference\n- `cancelUUID` – for cancel link\n- `totalTVA` – total amount to charge client\n- `gain` – TVA net profit\n- Full pricing breakdown (vendorPrice, commission, sc, vat, wt, ppc)\n\nA confirmation email is sent to the first guest's email on success."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Hotels – Admin",
+      "description": "All routes require `admin_token` (staff or superadmin role).\n\nBooking identifier: use the `tvaId` string (e.g. `TVA-XXXXXXXX`) as `{id}` in all booking sub-routes. Numeric DB `id` is also accepted as a fallback.\n\n**New in v3:** cancel, payment-status, refund, revenue-chart, top-hotels endpoints.",
+      "item": [
+        {
+          "name": "List All Hotel Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/bookings?per_page=15",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","bookings"],
+              "query": [
+                { "key": "per_page",       "value": "15", "description": "Results per page (default 15)" },
+                { "key": "status",         "value": "",   "disabled": true, "description": "confirmed | failed | cancelled | pending" },
+                { "key": "payment_status", "value": "",   "disabled": true, "description": "pending | paid | failed | cancelled | refunded" },
+                { "key": "email",          "value": "",   "disabled": true, "description": "Partial match on guest email" },
+                { "key": "name",           "value": "",   "disabled": true, "description": "Partial match on first_name OR last_name" },
+                { "key": "type",           "value": "",   "disabled": true, "description": "Provider type e.g. amadeus" },
+                { "key": "currency",       "value": "",   "disabled": true, "description": "ISO 4217 e.g. NGN, USD" },
+                { "key": "from_date",      "value": "",   "disabled": true, "description": "Booking created on or after YYYY-MM-DD" },
+                { "key": "to_date",        "value": "",   "disabled": true, "description": "Booking created on or before YYYY-MM-DD" }
+              ]
+            },
+            "description": "Paginated list of all hotel bookings with flexible filters.\n\nResponse includes linked user info (`user_uuid`, `first_name`, `last_name`, `email`)."
+          }
+        },
+        {
+          "name": "Get Hotel Booking (Admin)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/bookings/{{hotelTvaId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","bookings","{{hotelTvaId}}"]
+            },
+            "description": "Retrieve a single hotel booking by its TVA ID (e.g. `TVA-XXXXXXXX`) or numeric database ID.\n\nResponse includes the full booking record plus linked user info (`id`, `user_uuid`, `first_name`, `last_name`, `email`, `phone`)."
+          }
+        },
+        {
+          "name": "Update Hotel Booking Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"confirmed\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/bookings/{{hotelTvaId}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","bookings","{{hotelTvaId}}","status"]
+            },
+            "description": "Manually override the booking status.\n\n**Allowed values:** `confirmed` | `failed` | `cancelled` | `pending`\n\nFor refunds use the dedicated `/refund` endpoint instead."
+          }
+        },
+        {
+          "name": "Update Payment Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"payment_status\": \"paid\"\n}" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/bookings/{{hotelTvaId}}/payment-status",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","bookings","{{hotelTvaId}}","payment-status"]
+            },
+            "description": "Manually update the payment status independently of the booking status.\n\n**Allowed values:** `pending` | `paid` | `failed` | `cancelled` | `refunded`\n\nUseful for manual reconciliation when Paystack webhooks are missed or delayed."
+          }
+        },
+        {
+          "name": "Refund Booking",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "POST",
+            "header": [],
+            "body": { "mode": "raw", "raw": "" },
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/bookings/{{hotelTvaId}}/refund",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","bookings","{{hotelTvaId}}","refund"]
+            },
+            "description": "Mark a hotel booking as refunded in one atomic operation.\n\n**Effect:** Sets `status → cancelled` and `payment_status → refunded` simultaneously.\n\n**Returns 422** if already refunded.\n\nNote: The actual payment reversal must be completed separately (Paystack dashboard or manual bank transfer)."
+          }
+        },
+        {
+          "name": "Cancel Booking (DB-level)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/bookings/{{hotelTvaId}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","bookings","{{hotelTvaId}}","cancel"]
+            },
+            "description": "Cancel a hotel booking and mark it as `cancelled` in the TVA database.\n\n**Important:** Amadeus Hotel Bookings v1 has no self-service cancellation API. This endpoint only updates the local record. Any GDS-side or property-level cancellation must be handled offline by the operations team.\n\n**Returns 422** if the booking is already cancelled."
+          }
+        },
+        {
+          "name": "Hotel Stats (KPIs)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","stats"]
+            },
+            "description": "Comprehensive KPI dashboard data for hotel bookings.\n\n**Response fields:**\n\n| Field | Description |\n|---|---|\n| `total` | All-time booking count |\n| `pending` | Bookings awaiting confirmation |\n| `confirmed` | Successfully confirmed bookings |\n| `cancelled` | Cancelled bookings |\n| `failed` | Failed booking attempts |\n| `payment_breakdown` | Count per payment_status value |\n| `total_revenue` | All-time confirmed revenue (totalTVA) |\n| `total_gain` | All-time TVA net profit |\n| `total_vendor_cost` | All-time raw Amadeus cost |\n| `revenue_this_month` | Confirmed revenue this calendar month |\n| `revenue_last_month` | Confirmed revenue last calendar month |\n| `revenue_this_year` | Confirmed revenue this calendar year |\n| `avg_booking_value` | Average totalTVA per confirmed booking |\n| `by_currency` | Revenue and count per booking currency |\n| `by_provider` | Revenue and count per provider (amadeus etc.) |"
+          }
+        },
+        {
+          "name": "Revenue Chart (Last 12 Months)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/revenue-chart",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","revenue-chart"]
+            },
+            "description": "Monthly revenue breakdown for the past 12 months. Designed for charting on the admin dashboard.\n\n**Response:** Array of objects sorted oldest → newest:\n```json\n[\n  { \"month\": \"2025-05\", \"bookings\": 8, \"revenue\": 320000.00, \"gain\": 12800.00 },\n  ...\n]\n```\n\nMonths with zero confirmed bookings are omitted from the response."
+          }
+        },
+        {
+          "name": "Top Hotels",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/hotels/top-hotels?limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","hotels","top-hotels"],
+              "query": [
+                { "key": "limit", "value": "10", "description": "Number of properties to return (default 10, max 50)" }
+              ]
+            },
+            "description": "Most booked hotel properties on the TVA platform, ranked by booking volume.\n\nHotel name and ID are extracted from the stored Amadeus booking JSON.\n\n**Response per property:**\n```json\n{\n  \"hotel_id\": \"LKLONBGD\",\n  \"hotel_name\": \"THE BILTMORE MAYFAIR\",\n  \"total_bookings\": 34,\n  \"total_revenue\": 1280000.00,\n  \"total_gain\": 51200.00\n}\n```\n\nOnly confirmed bookings are counted. Useful for commercial partnerships and featured property campaigns."
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Hotels – My Bookings",
+      "description": "User-facing hotel booking management. Routes are optional-auth — include a Bearer token to scope results to the authenticated user.",
+      "item": [
+        {
+          "name": "4. Get My Hotel Bookings",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/bookings?per_page=15",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","bookings"],
+              "query": [
+                { "key": "per_page", "value": "15", "description": "Results per page (default 15)" },
+                { "key": "status",   "value": "",   "description": "Filter by status: confirmed | failed | cancelled | pending", "disabled": true }
+              ]
+            },
+            "description": "Returns paginated hotel bookings for the authenticated user.\n\nEach booking includes a `hotel_summary` object:\n- `hotel_id`, `hotel_name`, `chain_code`\n- `check_in`, `check_out`\n- `room_type`\n\nAlso includes `pnr` (Amadeus `reservationId`, falls back to `tvaId`)."
+          }
+        },
+        {
+          "name": "4b. Get Single Hotel Booking",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/bookings/{{hotelTvaId}}",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","bookings","{{hotelTvaId}}"]
+            },
+            "description": "Get full details for one hotel booking by its `tvaId`."
+          }
+        },
+        {
+          "name": "4c. Confirm Payment",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paystack_reference\": \"PSK_REF_XXXXXXXXXX\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/bookings/{{hotelTvaId}}/confirm-payment",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","bookings","{{hotelTvaId}}","confirm-payment"]
+            },
+            "description": "Mark a hotel booking's payment as confirmed after a successful Paystack transaction.\n\n- Can only be called once — returns 422 if payment is already processed.\n- Requires `paystack_reference` from the Paystack callback."
+          }
+        },
+        {
+          "name": "5. Cancel Hotel Booking",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}", "description": "Optional – include to verify ownership", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/hotels/bookings/{{hotelCancelUUID}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","hotels","bookings","{{hotelCancelUUID}}","cancel"]
+            },
+            "description": "Cancel a hotel booking using its `cancelUUID`.\n\n**Auth behaviour:**\n- Without token → any caller with the `cancelUUID` can cancel (treat the UUID as a secret link)\n- With Bearer token → backend verifies the booking belongs to the authenticated user; returns 403 if not\n\n**Business rules:**\n- Returns 422 if already cancelled\n- Returns 404 if `cancelUUID` not found\n\n**Important:** Amadeus Hotel Booking v1 has no self-service cancel API. This endpoint only marks the booking as `cancelled` in the TVA database. Actual hotel cancellation must be handled offline with the property directly."
+          }
+        }
+      ]
+    }
+
+  ]
+}
